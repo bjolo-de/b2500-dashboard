@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #fafafa;
+  color: #18181b;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Hide focus rings on mouse, keep for keyboard */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Recharts: use system fonts */
+.recharts-text,
+.recharts-cartesian-axis-tick-value,
+.recharts-tooltip-label {
+  font-family: inherit;
+  fill: #71717a;
+}

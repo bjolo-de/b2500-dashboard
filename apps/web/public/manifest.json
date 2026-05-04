@@ -1,0 +1,12 @@
+{
+  "name": "B2500 Energy",
+  "short_name": "B2500",
+  "description": "Energiemonitoring für Balkonkraftwerk + Marstek B2500",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#fafafa",
+  "background_color": "#fafafa",
+  "icons": []
+}

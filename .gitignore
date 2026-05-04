@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artefacts
+.next/
+out/
+dist/
+build/
+
+# Local env / secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+**/secrets.yml
+**/secrets.json
+apps/cloud-stack/**/config.yml
+apps/cloud-stack/**/.env
+
+# SSH keys — never commit, regardless of where they end up
+*.key
+*.pem
+*.priv
+id_rsa*
+id_ed25519*
+ssh-key-*
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# fly.io
+.fly/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Coverage
+coverage/
