@@ -1,6 +1,5 @@
 // Data access layer. All reads go through the anon-key Supabase client.
-// Server-side only (these functions are called from Server Components or
-// route handlers, never from the browser).
+// Server-side only.
 
 import { supabase } from "./supabase";
 
@@ -19,7 +18,7 @@ export type MarstekRow = {
   pv_input1_w: number | null;
   pv_input2_w: number | null;
   output_total_w: number | null;
-  daily_pv_charge_wh: number | null;       // misnamed: actually total PV today
+  daily_pv_charge_wh: number | null;
   daily_battery_charge_wh: number | null;
   daily_battery_discharge_wh: number | null;
   temp_min_c: number | null;
@@ -46,39 +45,24 @@ export type UserSettings = {
   ntfy_topic: string | null;
 };
 
-export type Period = "today" | "week" | "month";
-
-function periodStart(period: Period): Date {
-  const now = new Date();
-  const d = new Date(now);
-  d.setSeconds(0, 0);
-  if (period === "today") {
-    d.setHours(0, 0, 0, 0);
-  } else if (period === "week") {
-    d.setDate(d.getDate() - 7);
-  } else {
-    d.setMonth(d.getMonth() - 1);
-  }
-  return d;
-}
-
-export async function fetchShellyReadings(period: Period): Promise<ShellyRow[]> {
-  const since = periodStart(period).toISOString();
+export async function fetchShellyRange(from: Date, to: Date): Promise<ShellyRow[]> {
   const { data, error } = await supabase
     .from("shelly_readings")
     .select("ts, total_w, a_w, b_w, c_w")
-    .gte("ts", since)
-    .order("ts", { ascending: true });
+    .gte("ts", from.toISOString())
+    .lte("ts", to.toISOString())
+    .order("ts", { ascending: true })
+    .returns<ShellyRow[]>();
   if (error) throw error;
   return data ?? [];
 }
 
-export async function fetchMarstekReadings(period: Period): Promise<MarstekRow[]> {
-  const since = periodStart(period).toISOString();
+export async function fetchMarstekRange(from: Date, to: Date): Promise<MarstekRow[]> {
   const { data, error } = await supabase
     .from("marstek_readings")
     .select("ts, battery_soc_pct, pv_total_w, pv_input1_w, pv_input2_w, output_total_w, daily_pv_charge_wh, daily_battery_charge_wh, daily_battery_discharge_wh, temp_min_c, temp_max_c, charge_alarm, discharge_alarm")
-    .gte("ts", since)
+    .gte("ts", from.toISOString())
+    .lte("ts", to.toISOString())
     .order("ts", { ascending: true })
     .returns<MarstekRow[]>();
   if (error) throw error;

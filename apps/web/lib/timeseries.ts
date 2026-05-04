@@ -4,12 +4,12 @@
 import type { ShellyRow, MarstekRow } from "./queries";
 
 export type ChartPoint = {
-  ts: string;          // ISO
-  tsMs: number;        // for Recharts numeric x-axis
-  pv: number | null;        // W (PV produced by Marstek)
-  saldo: number | null;     // W (grid balance from Shelly: + import, - export)
-  soc: number | null;       // % (battery SOC)
-  output: number | null;    // W (Marstek output to Hoymiles)
+  ts: string;
+  tsMs: number;
+  pv: number | null;
+  saldo: number | null;
+  soc: number | null;
+  output: number | null;
 };
 
 function ffill<T>(arr: (T | null)[]): (T | null)[] {
@@ -24,18 +24,10 @@ export function mergeTimeSeries(
   shelly: ShellyRow[],
   marstek: MarstekRow[],
 ): ChartPoint[] {
-  // Index points by ts (string, fine for ms-precision ISO).
   const map = new Map<string, ChartPoint>();
   for (const s of shelly) {
     const tsMs = new Date(s.ts).getTime();
-    map.set(s.ts, {
-      ts: s.ts,
-      tsMs,
-      pv: null,
-      saldo: s.total_w,
-      soc: null,
-      output: null,
-    });
+    map.set(s.ts, { ts: s.ts, tsMs, pv: null, saldo: s.total_w, soc: null, output: null });
   }
   for (const m of marstek) {
     const tsMs = new Date(m.ts).getTime();
@@ -46,8 +38,7 @@ export function mergeTimeSeries(
       existing.output = m.output_total_w;
     } else {
       map.set(m.ts, {
-        ts: m.ts,
-        tsMs,
+        ts: m.ts, tsMs,
         pv: m.pv_total_w,
         saldo: null,
         soc: m.battery_soc_pct,
@@ -56,9 +47,6 @@ export function mergeTimeSeries(
     }
   }
   const merged = Array.from(map.values()).sort((a, b) => a.tsMs - b.tsMs);
-
-  // Forward-fill so each line stays continuous between samples instead of
-  // dropping to null when the other source took a sample.
   const pv = ffill(merged.map((m) => m.pv));
   const saldo = ffill(merged.map((m) => m.saldo));
   const soc = ffill(merged.map((m) => m.soc));
@@ -72,9 +60,43 @@ export function mergeTimeSeries(
   }));
 }
 
-// Aggregate per-day SOC min/max for week/month views.
+// Bucket points into fixed time windows for week/month chart resolution.
+// Average power values, last-value SOC. If bucketSizeMs <= 0 → returns input.
+export function bucketTimeSeries(points: ChartPoint[], bucketSizeMs: number): ChartPoint[] {
+  if (bucketSizeMs <= 0 || points.length < 2) return points;
+  const buckets = new Map<number, {
+    tsMs: number;
+    pvSum: number; pvN: number;
+    saldoSum: number; saldoN: number;
+    outputSum: number; outputN: number;
+    socLast: number | null;
+  }>();
+  for (const p of points) {
+    const k = Math.floor(p.tsMs / bucketSizeMs) * bucketSizeMs;
+    let b = buckets.get(k);
+    if (!b) {
+      b = { tsMs: k, pvSum: 0, pvN: 0, saldoSum: 0, saldoN: 0, outputSum: 0, outputN: 0, socLast: null };
+      buckets.set(k, b);
+    }
+    if (p.pv != null) { b.pvSum += p.pv; b.pvN += 1; }
+    if (p.saldo != null) { b.saldoSum += p.saldo; b.saldoN += 1; }
+    if (p.output != null) { b.outputSum += p.output; b.outputN += 1; }
+    if (p.soc != null) b.socLast = p.soc;
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => a.tsMs - b.tsMs)
+    .map((b) => ({
+      ts: new Date(b.tsMs).toISOString(),
+      tsMs: b.tsMs,
+      pv: b.pvN > 0 ? b.pvSum / b.pvN : null,
+      saldo: b.saldoN > 0 ? b.saldoSum / b.saldoN : null,
+      output: b.outputN > 0 ? b.outputSum / b.outputN : null,
+      soc: b.socLast,
+    }));
+}
+
 export type DailySocBand = {
-  date: string;        // YYYY-MM-DD
+  date: string;
   dateMs: number;
   min: number;
   max: number;
@@ -86,7 +108,7 @@ export function dailySocBands(marstek: MarstekRow[]): DailySocBand[] {
     if (m.battery_soc_pct == null) continue;
     const d = new Date(m.ts);
     const key = d.toISOString().slice(0, 10);
-    const ms = new Date(key + "T12:00:00Z").getTime();  // noon for x-axis
+    const ms = new Date(key + "T12:00:00Z").getTime();
     const cur = byDay.get(key);
     if (!cur) {
       byDay.set(key, { min: m.battery_soc_pct, max: m.battery_soc_pct, ms });
@@ -96,11 +118,6 @@ export function dailySocBands(marstek: MarstekRow[]): DailySocBand[] {
     }
   }
   return Array.from(byDay.entries())
-    .map(([date, v]) => ({
-      date,
-      dateMs: v.ms,
-      min: v.min,
-      max: v.max,
-    }))
+    .map(([date, v]) => ({ date, dateMs: v.ms, min: v.min, max: v.max }))
     .sort((a, b) => a.dateMs - b.dateMs);
 }
