@@ -1,56 +1,81 @@
 # b2500-dashboard
 
 A small, self-hostable energy dashboard for a balcony-PV setup with a
-Marstek B2500 storage system and a Shelly 3EM Gen3 smart meter.
+**Marstek B2500** storage system and a **Shelly 3EM Gen3** smart meter.
 
-Companion to [b2500-pico-bridge](https://github.com/bjolo-de/b2500-pico-bridge),
-which handles the live B2500 ↔ Shelly meter relay. This repo is the
+Companion to [b2500-pico-bridge](https://github.com/bjolo-de/b2500-pico-bridge)
+— that one handles the live B2500 ↔ Shelly relay; this one is the
 monitoring layer on top.
 
 ## What it shows
 
-- **Top KPIs**: current PV production, current battery SOC, money saved today
-- **Today chart**: PV / grid balance / SOC over the day, exact step-lines (no
-  spline smoothing — the line follows the measurement)
-- **SOC trend**: per-day min/max bands for week and month views
-- **System status**: passive heartbeat banner if any component goes silent
-- **Push alerts**: ntfy.sh notification when a component drops offline
-
-Mobile-first PWA, add-to-homescreen on iOS.
+- **Live energy flow** — animated diagram with PV, battery, home, grid;
+  each path's watt-flow labelled, dots flow in the direction of energy.
+  Tap any arrow for an explanation.
+- **Period KPIs** (Heute / Woche / Monat): PV produced, consumption,
+  Eigenverbrauchsquote, Autarkiegrad, grid import/export, savings — with
+  formula tooltips so you can hand the dashboard to a non-technical friend.
+- **Today chart** — PV, grid balance, SOC on a single time axis; linear
+  lines (anti-spline) so the visual follows the measurement exactly.
+- **System health** — three pills, one per component (Shelly, Marstek-MQTT,
+  Pico-Bridge); plain-language hints if a heartbeat goes stale.
+- **Push alerts** via ntfy.sh on offline transitions.
+- **Editable tariff** — click the footer to adjust energy price, base
+  fee, feed-in rate. Used live in the savings calculation.
+- **Mobile-first PWA**, add-to-homescreen on iOS — opens fullscreen,
+  status bar tinted to theme.
 
 ## Architecture
 
 ```
-B2500 ──MQTT──→ HiveMQ Cloud ──→ fly.io stack ──→ Supabase
-                                  (Hame-Relay,    (Postgres)
-                                   hm2mqtt,           │
-                                   Forwarder)         ▼
-Shelly 3EM ──HTTP/script──────────────────────→ Vercel (Next.js PWA)
-                                                      │
-Pico Bridge ──heartbeat────────────────────────→      ▼
-                                                  iPhone
+B2500 ──MQTT (plain :1883)──→ Oracle Cloud Always-Free VM
+                              ├─ Mosquitto (broker)
+                              ├─ Hame-Relay   ↔ Hame Cloud (keeps Marstek app alive)
+                              ├─ hm2mqtt      (parses B2500 telemetry)
+                              └─ Forwarder    → Supabase
+                              ↑
+                              cron */5 min curls /api/health-check on Vercel
+                              └→ ntfy.sh push on outage
+Shelly 3EM Gen3 ──Shelly script──→ Supabase
+Pico Bridge ──heartbeat──────────→ Supabase
+
+Supabase (Postgres + RLS, anon read-only)
+   ↓
+Vercel (Next.js 15 PWA) → iPhone
 ```
 
-The Marstek app keeps working: Hame-Relay forwards the local MQTT topics
-back to the Hame cloud, so the official mobile app sees the device exactly
-as before.
-
-See [docs/architecture.md](docs/architecture.md) for the long version and
-[docs/setup.md](docs/setup.md) for end-to-end setup.
+Why these choices specifically: see [docs/architecture.md](docs/architecture.md).
 
 ## Repository layout
 
 ```
 apps/
-  web/             Next.js dashboard (deployed to Vercel)
-  shelly-script/   JS script that runs on the Shelly 3EM Gen3
-  cloud-stack/     Docker stack (Hame-Relay + hm2mqtt + Forwarder) on fly.io
+  web/                Next.js dashboard (Vercel)
+  shelly-script/      Single-file Shelly Script
+  cloud-stack/        Single Docker image bundling Mosquitto + Hame-Relay
+                      + hm2mqtt + Forwarder via supervisord (Oracle VM)
 packages/
-  db/migrations/   SQL run against the Supabase Postgres
+  db/migrations/      Supabase SQL migrations
 docs/
-  setup.md         Step-by-step setup, including hmjs B2500 reconfig
-  architecture.md  Why the components look the way they do
+  setup.md            End-to-end setup walkthrough
+  architecture.md     Decision records — why this shape, what's not solved
 ```
+
+## Setup
+
+See [docs/setup.md](docs/setup.md) for the full walkthrough. Estimated
+time: ~2–3 h, mostly waiting for Oracle Cloud to provision.
+
+## Costs
+
+0 €/year:
+- Supabase free tier
+- Oracle Cloud Always-Free (Ampere or AMD micro VM, free public IPv4)
+- Vercel Hobby
+- ntfy.sh public
+
+The only required spend is hardware you already have (Marstek B2500,
+Shelly 3EM Gen3, Pico W). No additional sensors or gateways needed.
 
 ## License
 
