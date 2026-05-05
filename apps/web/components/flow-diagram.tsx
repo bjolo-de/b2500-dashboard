@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { Sun, BatteryMedium, Home, Zap } from "lucide-react";
+import { Sun, BatteryMedium, Home, Zap, ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const COLORS = {
@@ -14,11 +14,9 @@ const COLORS = {
   inactive: "#d4d4d8",
 };
 
-// Visibility thresholds expressed in normalised intensity (0..1)
 const T_VISIBLE = 0.0015;
-const T_DOTS    = 0.040;
 
-// ─── Layout geometry helpers ──────────────────────────────────────────────
+// ─── Layout ──────────────────────────────────────────────────────────────
 
 type Card = { x: number; y: number; w: number; h: number };
 type Cards = { pv: Card; battery: Card; home: Card; grid: Card };
@@ -62,10 +60,10 @@ const DESKTOP_PATHS: Paths = {
   homeGrid:    `M ${DA.homeRight.x} ${DA.homeRight.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.gridLeft.y}, ${DA.gridLeft.x} ${DA.gridLeft.y}`,
 };
 const DESKTOP_LABELS: Labels = {
-  pvHome:      { x: (DA.pvRight.x + DA.homeLeft.x) / 2,    y: (DA.pvRight.y + DA.homeLeft.y) / 2 - 12, anchor: "middle" },
-  pvBattery:   { x: (DA.pvRight.x + DA.batteryLeft.x) / 2, y: (DA.pvRight.y + DA.batteryLeft.y) / 2 + 16, anchor: "middle" },
-  batteryHome: { x: DA.batteryTop.x + 14,                  y: (DA.batteryTop.y + DA.homeBottom.y) / 2, anchor: "start" },
-  homeGrid:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: (DA.homeRight.y + DA.gridLeft.y) / 2 - 12, anchor: "middle" },
+  pvHome:      { x: (DA.pvRight.x + DA.homeLeft.x) / 2,    y: (DA.pvRight.y + DA.homeLeft.y) / 2 - 16, anchor: "middle" },
+  pvBattery:   { x: (DA.pvRight.x + DA.batteryLeft.x) / 2, y: (DA.pvRight.y + DA.batteryLeft.y) / 2 + 18, anchor: "middle" },
+  batteryHome: { x: DA.batteryTop.x + 14,                  y: (DA.batteryTop.y + DA.homeBottom.y) / 2 - 6, anchor: "start" },
+  homeGrid:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: (DA.homeRight.y + DA.gridLeft.y) / 2 - 16, anchor: "middle" },
 };
 
 const MOBILE: Total & { cards: Cards } = {
@@ -85,61 +83,88 @@ const MOBILE_PATHS: Paths = {
   homeGrid:    `M ${MA.homeBottom.x} ${MA.homeBottom.y} Q ${MA.homeBottom.x - 20} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.gridTop.x} ${MA.gridTop.y}`,
 };
 const MOBILE_LABELS: Labels = {
-  pvBattery:   { x: MA.batteryTop.x + 26, y: (MA.pvBottom.y + MA.batteryTop.y) / 2 - 8, anchor: "start" },
-  pvHome:      { x: MA.homeTop.x - 26,    y: (MA.pvBottom.y + MA.homeTop.y) / 2 - 8,    anchor: "end" },
-  batteryHome: { x: (MA.batteryRight.x + MA.homeLeft.x) / 2, y: MA.batteryRight.y - 12, anchor: "middle" },
-  homeGrid:    { x: MA.homeBottom.x - 26, y: (MA.homeBottom.y + MA.gridTop.y) / 2,      anchor: "end" },
+  pvBattery:   { x: MA.batteryTop.x + 26, y: (MA.pvBottom.y + MA.batteryTop.y) / 2 - 12, anchor: "start" },
+  pvHome:      { x: MA.homeTop.x - 26,    y: (MA.pvBottom.y + MA.homeTop.y) / 2 - 12,    anchor: "end" },
+  batteryHome: { x: (MA.batteryRight.x + MA.homeLeft.x) / 2, y: MA.batteryRight.y - 14, anchor: "middle" },
+  homeGrid:    { x: MA.homeBottom.x - 26, y: (MA.homeBottom.y + MA.gridTop.y) / 2 - 4,   anchor: "end" },
 };
 
 function strokeWidth(intensity: number) {
   return Math.max(1.4, Math.min(5.5, 1 + intensity * 5));
 }
+// Always animate when visible — at low intensity 1 dot, scaling up.
 function dotCount(intensity: number) {
-  if (intensity < T_DOTS) return 0;
-  if (intensity < 0.25)   return 1;
-  if (intensity < 0.625)  return 2;
+  if (intensity < T_VISIBLE) return 0;
+  if (intensity < 0.05)      return 1;
+  if (intensity < 0.25)      return 2;
   return 3;
 }
 
-// ─── Public API types ────────────────────────────────────────────────────
+// ─── Public types ────────────────────────────────────────────────────────
+
+export type Trend = {
+  /** Percentage change vs previous period. Null = previous was zero (undefined). */
+  pct: number | null;
+  /** Reference period for the label, e.g. "Vorwoche". */
+  vs: string;
+};
 
 export type ModuleSpec = {
   big: string;
   small?: string;
+  trend?: Trend;
   highlighted: boolean;
-  /** Only used for the Netz card: "import"|"export"|"idle" controls accent color. */
   variant?: "import" | "export" | "idle";
 };
 
 export type FlowSpec = {
   intensity: number;
   label: string;
-  /** For homeGrid: "import" reverses dot direction. */
+  trend?: Trend;
   direction?: "export" | "import" | "idle";
 };
 
 type Props = {
   modules: { pv: ModuleSpec; battery: ModuleSpec; home: ModuleSpec; grid: ModuleSpec };
-  flows: {
-    pvHome: FlowSpec;
-    pvBattery: FlowSpec;
-    batteryHome: FlowSpec;
-    homeGrid: FlowSpec;
-  };
+  flows: { pvHome: FlowSpec; pvBattery: FlowSpec; batteryHome: FlowSpec; homeGrid: FlowSpec };
   tooltips: Record<FlowKey, string>;
 };
 
 // ─── Components ──────────────────────────────────────────────────────────
 
+function fmtTrendPct(pct: number): string {
+  const a = Math.abs(pct);
+  // German number format
+  const fmt = a >= 100
+    ? Math.round(a).toString()
+    : a >= 10
+      ? a.toFixed(0)
+      : a.toFixed(1).replace(".", ",");
+  return `${fmt} %`;
+}
+
+function TrendInline({ trend }: { trend: Trend }) {
+  if (trend.pct == null) {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-400">
+        <Minus size={10} strokeWidth={2.4} />
+        <span>vs. {trend.vs}</span>
+      </span>
+    );
+  }
+  const flat = Math.abs(trend.pct) < 0.5;
+  const Icon = flat ? Minus : trend.pct > 0 ? ArrowUp : ArrowDown;
+  return (
+    <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-500">
+      <Icon size={10} strokeWidth={2.4} />
+      <span className="font-mono tabular-nums">{flat ? "≈" : fmtTrendPct(trend.pct)}</span>
+      <span className="ml-0.5">vs. {trend.vs}</span>
+    </span>
+  );
+}
+
 function FlowArc({
-  d,
-  flow,
-  color,
-  reduceMotion,
-  labelPos,
-  duration = 2.5,
-  onActivate,
-  isActive,
+  d, flow, color, reduceMotion, labelPos, duration = 2.5, onActivate, isActive,
 }: {
   d: string;
   flow: FlowSpec;
@@ -155,6 +180,11 @@ function FlowArc({
   const stroke = visible ? color : COLORS.inactive;
   const dots = visible && !reduceMotion ? dotCount(flow.intensity) : 0;
   const reverse = flow.direction === "import";
+  const showTrend = visible && flow.trend != null;
+  const labelHeight = showTrend ? 30 : 20;
+  const labelY = labelPos.y - 11;
+  const trendY = labelPos.y + 11;
+
   return (
     <g style={{ cursor: "pointer" }} onClick={onActivate} onMouseEnter={onActivate}>
       <path d={d} stroke={stroke} strokeWidth={sw} strokeLinecap="round" fill="none" opacity={visible ? 1 : 0.55} />
@@ -176,10 +206,10 @@ function FlowArc({
       {visible && flow.label ? (
         <g pointerEvents="none">
           <rect
-            x={labelPos.anchor === "middle" ? labelPos.x - 28 : labelPos.anchor === "start" ? labelPos.x - 4 : labelPos.x - 52}
-            y={labelPos.y - 11}
-            width={56}
-            height={20}
+            x={labelPos.anchor === "middle" ? labelPos.x - 32 : labelPos.anchor === "start" ? labelPos.x - 4 : labelPos.x - 60}
+            y={labelY}
+            width={64}
+            height={labelHeight}
             rx={6}
             fill="white"
             opacity={0.96}
@@ -188,7 +218,7 @@ function FlowArc({
           />
           <text
             x={labelPos.x}
-            y={labelPos.y + 1}
+            y={showTrend ? labelPos.y - 1 : labelPos.y + 1}
             fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
             fontSize="11"
             fontWeight="600"
@@ -198,6 +228,24 @@ function FlowArc({
           >
             {flow.label}
           </text>
+          {showTrend && flow.trend ? (
+            <text
+              x={labelPos.x}
+              y={trendY}
+              fontFamily="ui-sans-serif, system-ui"
+              fontSize="9"
+              fontWeight="500"
+              fill="#71717a"
+              textAnchor={labelPos.anchor}
+              dominantBaseline="middle"
+            >
+              {flow.trend.pct == null
+                ? "—"
+                : Math.abs(flow.trend.pct) < 0.5
+                  ? "≈"
+                  : `${flow.trend.pct > 0 ? "↑" : "↓"} ${fmtTrendPct(flow.trend.pct)}`}
+            </text>
+          ) : null}
         </g>
       ) : null}
     </g>
@@ -205,13 +253,7 @@ function FlowArc({
 }
 
 function NodeCard({
-  className,
-  style,
-  icon,
-  label,
-  spec,
-  accentColor,
-  compact = false,
+  className, style, icon, label, spec, accentColor, compact = false,
 }: {
   className?: string;
   style?: React.CSSProperties;
@@ -244,13 +286,21 @@ function NodeCard({
         </span>
       </div>
       <div
-        className={cn("mt-1 font-mono font-semibold tabular-nums leading-tight", compact ? "text-base" : "text-lg")}
+        className={cn(
+          "mt-1 font-mono font-semibold tabular-nums leading-tight whitespace-nowrap",
+          compact ? "text-base" : "text-lg",
+        )}
         style={{ color: spec.highlighted ? accentColor : "#18181b" }}
       >
         {spec.big}
       </div>
       {spec.small ? (
-        <div className="mt-0.5 text-[11px] leading-tight text-ink-500">{spec.small}</div>
+        <div className="mt-0.5 text-[11px] leading-tight text-ink-500 truncate">{spec.small}</div>
+      ) : null}
+      {spec.trend ? (
+        <div className="mt-0.5">
+          <TrendInline trend={spec.trend} />
+        </div>
       ) : null}
     </motion.div>
   );
@@ -347,9 +397,7 @@ export function FlowDiagram({ modules, flows, tooltips }: Props) {
 
 function FlowTooltip({
   x, y, total, text, onDismiss,
-}: {
-  x: number; y: number; total: Total; text: string; onDismiss: () => void;
-}) {
+}: { x: number; y: number; total: Total; text: string; onDismiss: () => void }) {
   const left = `${(x / total.W) * 100}%`;
   const top = `${(y / total.H) * 100}%`;
   return (
