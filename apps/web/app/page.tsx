@@ -15,7 +15,7 @@ import {
 } from "@/lib/aggregates";
 import { aggregateByDay } from "@/lib/aggregates";
 import { classifyHealth } from "@/lib/system-health";
-import { mergeTimeSeries, dailySocBands, enrichStacked } from "@/lib/timeseries";
+import { mergeTimeSeries, dailySocBands, enrichStacked, bucketTimeSeries } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
 import {
   AGGREGATE_PERIODS,
@@ -60,6 +60,11 @@ const TREND_VS: Record<AggregatePeriod, string> = {
   month: "Vormonat",
 };
 const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
+
+// Bucket size for the day-view stacked-area chart. 5 min averages out
+// transient inrush spikes (kettle, coffee machine inductive bursts often
+// briefly read 10–20 kW for ~1 s) without losing meaningful sustained loads.
+const DAY_BUCKET_MS = 5 * 60 * 1000;
 
 // ─── Display formatters ───────────────────────────────────────────────────
 
@@ -289,7 +294,9 @@ export default async function Page({
         .reverse()[0] ?? null;
 
     const diagram = buildLiveDiagram(live, todayAgg);
-    const todayPoints = enrichStacked(mergeTimeSeries(todayShelly, todayMarstek));
+    const todayPoints = enrichStacked(
+      bucketTimeSeries(mergeTimeSeries(todayShelly, todayMarstek), DAY_BUCKET_MS),
+    );
 
     return (
       <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -380,10 +387,10 @@ export default async function Page({
 
   const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod);
 
-  // Day-view: stacked-area of power flows.
+  // Day-view: stacked-area of power flows (5-min bucketed to tame inrush spikes).
   // Week/Month: daily bar chart of energy totals.
   const dayPoints = aggPeriod === "today"
-    ? enrichStacked(mergeTimeSeries(shelly, marstek))
+    ? enrichStacked(bucketTimeSeries(mergeTimeSeries(shelly, marstek), DAY_BUCKET_MS))
     : null;
   const dailyBars = aggPeriod !== "today"
     ? aggregateByDay(shelly, marstek, settings, range)
