@@ -28,27 +28,24 @@ export function PeriodSwitcher() {
   }
 
   return (
-    <div
-      className={cn(
-        "inline-flex rounded-full bg-ink-100 p-1 text-sm transition-opacity",
-        pending && "opacity-70",
-      )}
-    >
-      {PERIODS.map((p) => (
-        <button
-          key={p.key}
-          onClick={() => pick(p.key)}
-          disabled={pending}
-          className={cn(
-            "rounded-full px-3 py-1 transition",
-            current === p.key
-              ? "bg-white text-ink-900 shadow-sm"
-              : "text-ink-500 hover:text-ink-800",
-          )}
-        >
-          {p.label}
-        </button>
-      ))}
+    <div className={cn("flex w-full justify-center transition-opacity", pending && "opacity-70")}>
+      <div className="flex w-full max-w-md rounded-full bg-ink-100 p-1 text-sm sm:w-auto">
+        {PERIODS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => pick(p.key)}
+            disabled={pending}
+            className={cn(
+              "flex-1 rounded-full px-3 py-1.5 transition sm:flex-initial sm:px-4",
+              current === p.key
+                ? "bg-white text-ink-900 shadow-sm"
+                : "text-ink-500 hover:text-ink-800",
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

@@ -196,6 +196,13 @@ function buildAggregateDiagram(
         small: socRange,
         trend: tr(agg.cyclesEquivalent, prev?.cyclesEquivalent),
         highlighted: agg.cyclesEquivalent > 0.005,
+        dim: agg.cyclesEquivalent < 0.005,
+        info: {
+          title: "Speicher-Zyklen",
+          formula: "(geladen + entladen) ÷ (2 × 2,24 kWh)",
+          description:
+            "Anzahl effektiver Voll-Lade-Entlade-Zyklen im Zeitraum. Tag typisch < 1, Woche 3–7, Monat 20–40.",
+        },
       },
       home: {
         big: fmtKwh(agg.consumptionKwh),
@@ -295,11 +302,11 @@ export default async function Page({
               </div>
             ) : null}
           </div>
-          <PeriodSwitcher />
+          <SystemStatus items={health} />
         </header>
 
-        <div className="mt-3">
-          <SystemStatus items={health} />
+        <div className="mt-5">
+          <PeriodSwitcher />
         </div>
 
         <Card className="mt-5">
@@ -367,14 +374,14 @@ export default async function Page({
             B2500 Energy
           </h1>
         </div>
-        <PeriodSwitcher />
+        <SystemStatus items={health} />
       </header>
 
-      <div className="mt-3">
-        <SystemStatus items={health} />
+      <div className="mt-5">
+        <PeriodSwitcher />
       </div>
 
-      <div className="mt-5">
+      <div className="mt-4">
         <DateNavigator
           period={aggPeriod}
           label={range.label}

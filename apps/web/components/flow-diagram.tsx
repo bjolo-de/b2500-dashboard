@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Sun, BatteryMedium, Home, Zap, ArrowDown, ArrowUp, Minus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InfoTooltip } from "./info-tooltip";
 
 const COLORS = {
   pv: "#10b981",
@@ -11,7 +12,7 @@ const COLORS = {
   gridExport: "#3b82f6",
   gridImport: "#dc2626",
   home: "#71717a",
-  inactive: "#d4d4d8",
+  inactive: "#e4e4e7",
 };
 
 const T_VISIBLE = 0.0015;
@@ -44,17 +45,15 @@ function anchors(c: Cards) {
 }
 
 const DESKTOP: Total & { cards: Cards } = {
-  W: 720, H: 320,
+  W: 720, H: 340,
   cards: {
-    pv:      { x: 20,             y: (320 - 100) / 2, w: 170, h: 100 },
-    home:    { x: (720 - 170) / 2, y: 20,             w: 170, h: 100 },
-    battery: { x: (720 - 170) / 2, y: 320 - 20 - 100, w: 170, h: 100 },
-    grid:    { x: 720 - 20 - 170, y: (320 - 100) / 2, w: 170, h: 100 },
+    pv:      { x: 20,             y: (340 - 110) / 2, w: 170, h: 110 },
+    home:    { x: (720 - 170) / 2, y: 20,             w: 170, h: 110 },
+    battery: { x: (720 - 170) / 2, y: 340 - 20 - 110, w: 170, h: 110 },
+    grid:    { x: 720 - 20 - 170, y: (340 - 110) / 2, w: 170, h: 110 },
   },
 };
 const DA = anchors(DESKTOP.cards);
-// Desktop grid paths use upper / lower tracks of each card's edge so the two
-// flows occupy disjoint vertical bands and never visually cross.
 const D_HOME_RIGHT_X = DA.homeRight.x;
 const D_GRID_LEFT_X = DA.gridLeft.x;
 const D_HOME_TOP_Y = DESKTOP.cards.home.y;
@@ -65,47 +64,38 @@ const DESKTOP_PATHS: Paths = {
   pvHome:      `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.homeLeft.x) / 2} ${DA.homeLeft.y}, ${DA.homeLeft.x} ${DA.homeLeft.y}`,
   pvBattery:   `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.batteryLeft.x) / 2} ${DA.batteryLeft.y}, ${DA.batteryLeft.x} ${DA.batteryLeft.y}`,
   batteryHome: `M ${DA.batteryTop.x} ${DA.batteryTop.y} L ${DA.homeBottom.x} ${DA.homeBottom.y}`,
-  // Export: home upper-right → grid upper-left (top track)
-  homeGrid:    `M ${D_HOME_RIGHT_X} ${D_HOME_TOP_Y + 25} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_HOME_TOP_Y + D_GRID_TOP_Y + 25) / 2 - 4}, ${D_GRID_LEFT_X} ${D_GRID_TOP_Y + 25}`,
-  // Import: grid lower-left → home lower-right (bottom track)
-  gridHome:    `M ${D_GRID_LEFT_X} ${D_GRID_BOT_Y - 25} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_GRID_BOT_Y + D_HOME_BOT_Y - 25) / 2 + 4}, ${D_HOME_RIGHT_X} ${D_HOME_BOT_Y - 25}`,
+  homeGrid:    `M ${D_HOME_RIGHT_X} ${D_HOME_TOP_Y + 28} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_HOME_TOP_Y + D_GRID_TOP_Y) / 2 + 8}, ${D_GRID_LEFT_X} ${D_GRID_TOP_Y + 28}`,
+  gridHome:    `M ${D_GRID_LEFT_X} ${D_GRID_BOT_Y - 28} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_GRID_BOT_Y + D_HOME_BOT_Y) / 2 - 8}, ${D_HOME_RIGHT_X} ${D_HOME_BOT_Y - 28}`,
 };
 const DESKTOP_LABELS: Labels = {
   pvHome:      { x: (DA.pvRight.x + DA.homeLeft.x) / 2,    y: (DA.pvRight.y + DA.homeLeft.y) / 2 - 16, anchor: "middle" },
   pvBattery:   { x: (DA.pvRight.x + DA.batteryLeft.x) / 2, y: (DA.pvRight.y + DA.batteryLeft.y) / 2 + 18, anchor: "middle" },
   batteryHome: { x: DA.batteryTop.x + 14,                  y: (DA.batteryTop.y + DA.homeBottom.y) / 2 - 6, anchor: "start" },
-  homeGrid:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_HOME_TOP_Y + D_GRID_TOP_Y) / 2 + 4,   anchor: "middle" },
-  gridHome:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_GRID_BOT_Y + D_HOME_BOT_Y) / 2 - 12,  anchor: "middle" },
+  homeGrid:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_HOME_TOP_Y + D_GRID_TOP_Y) / 2 + 14,  anchor: "middle" },
+  gridHome:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_GRID_BOT_Y + D_HOME_BOT_Y) / 2 - 22,  anchor: "middle" },
 };
 
-// Mobile: widen the gap between Speicher and Wohnung so the batteryHome
-// label has clearance from the cards.
 const MOBILE: Total & { cards: Cards } = {
-  W: 360, H: 500,
+  W: 360, H: 540,
   cards: {
-    pv:      { x: 100, y: 20,  w: 160, h: 88 },
-    battery: { x: 12,  y: 196, w: 124, h: 88 },
-    home:    { x: 224, y: 196, w: 124, h: 88 },
-    grid:    { x: 100, y: 372, w: 160, h: 88 },
+    pv:      { x: 100, y: 20,  w: 160, h: 104 },
+    battery: { x: 12,  y: 218, w: 124, h: 104 },
+    home:    { x: 224, y: 218, w: 124, h: 104 },
+    grid:    { x: 100, y: 416, w: 160, h: 104 },
   },
 };
 const MA = anchors(MOBILE.cards);
-// Wohnung occupies right half of the bottom row, Netz centred at bottom.
-// Place the two grid paths on disjoint x-bands: export on the left half,
-// import on the right half. They never cross.
-const M_HOME_BOT_Y = MOBILE.cards.home.y + MOBILE.cards.home.h;       // 284
-const M_GRID_TOP_Y = MOBILE.cards.grid.y;                              // 372
-const M_HOME_LEFT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.25;   // 255
-const M_HOME_RIGHT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.75;  // 317
-const M_GRID_LEFT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.25;   // 140
-const M_GRID_RIGHT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.75;  // 220
+const M_HOME_BOT_Y = MOBILE.cards.home.y + MOBILE.cards.home.h;
+const M_GRID_TOP_Y = MOBILE.cards.grid.y;
+const M_HOME_LEFT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.25;
+const M_HOME_RIGHT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.75;
+const M_GRID_LEFT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.25;
+const M_GRID_RIGHT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.75;
 const MOBILE_PATHS: Paths = {
   pvBattery:   `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x - 50} ${(MA.pvBottom.y + MA.batteryTop.y) / 2}, ${MA.batteryTop.x} ${MA.batteryTop.y}`,
   pvHome:      `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x + 50} ${(MA.pvBottom.y + MA.homeTop.y) / 2}, ${MA.homeTop.x} ${MA.homeTop.y}`,
   batteryHome: `M ${MA.batteryRight.x} ${MA.batteryRight.y} L ${MA.homeLeft.x} ${MA.homeLeft.y}`,
-  // Export: home bottom-left → grid top-left (left half)
   homeGrid:    `M ${M_HOME_LEFT_Q} ${M_HOME_BOT_Y} Q ${(M_HOME_LEFT_Q + M_GRID_LEFT_Q) / 2 - 8} ${(M_HOME_BOT_Y + M_GRID_TOP_Y) / 2}, ${M_GRID_LEFT_Q} ${M_GRID_TOP_Y}`,
-  // Import: grid top-right → home bottom-right (right half)
   gridHome:    `M ${M_GRID_RIGHT_Q} ${M_GRID_TOP_Y} Q ${(M_HOME_RIGHT_Q + M_GRID_RIGHT_Q) / 2 + 8} ${(M_HOME_BOT_Y + M_GRID_TOP_Y) / 2}, ${M_HOME_RIGHT_Q} ${M_HOME_BOT_Y}`,
 };
 const MOBILE_LABELS: Labels = {
@@ -139,25 +129,21 @@ export type ModuleSpec = {
   trend?: Trend;
   highlighted: boolean;
   variant?: "import" | "export" | "idle";
+  /** Render value in light grey (no-data / zero state). */
+  dim?: boolean;
+  /** Optional info popover next to the card label. */
+  info?: { title?: string; formula?: string; description?: string };
 };
 
 export type FlowSpec = {
   intensity: number;
   label: string;
   trend?: Trend;
-  /** "import" reverses dot animation direction (used when path was authored as export). */
-  reverse?: boolean;
 };
 
 type Props = {
   modules: { pv: ModuleSpec; battery: ModuleSpec; home: ModuleSpec; grid: ModuleSpec };
-  flows: {
-    pvHome: FlowSpec;
-    pvBattery: FlowSpec;
-    batteryHome: FlowSpec;
-    homeGrid: FlowSpec;   // Wohnung → Netz (export, blue)
-    gridHome: FlowSpec;   // Netz → Wohnung (import, red)
-  };
+  flows: { pvHome: FlowSpec; pvBattery: FlowSpec; batteryHome: FlowSpec; homeGrid: FlowSpec; gridHome: FlowSpec };
   tooltips: Record<FlowKey, string>;
 };
 
@@ -171,10 +157,11 @@ function fmtTrendPct(pct: number): string {
   return `${fmt} %`;
 }
 
-function TrendInline({ trend }: { trend: Trend }) {
+function TrendInline({ trend, dim }: { trend: Trend; dim?: boolean }) {
+  const baseClass = dim ? "text-ink-300" : "text-ink-500";
   if (trend.pct == null) {
     return (
-      <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-400" title={`vs. ${trend.vs}`}>
+      <span className={cn("inline-flex items-center gap-0.5 text-[11px]", baseClass)} title={`vs. ${trend.vs}`}>
         <Minus size={10} strokeWidth={2.4} />
       </span>
     );
@@ -182,17 +169,31 @@ function TrendInline({ trend }: { trend: Trend }) {
   const flat = Math.abs(trend.pct) < 0.5;
   const Icon = flat ? Minus : trend.pct > 0 ? ArrowUp : ArrowDown;
   return (
-    <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-500" title={`vs. ${trend.vs}`}>
+    <span className={cn("inline-flex items-center gap-0.5 text-[11px]", baseClass)} title={`vs. ${trend.vs}`}>
       <Icon size={10} strokeWidth={2.4} />
       <span className="font-mono tabular-nums">{flat ? "≈" : fmtTrendPct(trend.pct)}</span>
     </span>
   );
 }
 
+/** Render "12,5 kWh" as <span>12,5</span><span class=unit>kWh</span> */
+function NumberWithUnit({ value }: { value: string }) {
+  const idx = value.indexOf(" ");
+  if (idx < 0) return <>{value}</>;
+  const num = value.slice(0, idx);
+  const unit = value.slice(idx + 1);
+  return (
+    <>
+      <span>{num}</span>
+      <span className="ml-1 text-[0.72em] font-medium opacity-70">{unit}</span>
+    </>
+  );
+}
+
 // ─── Components ──────────────────────────────────────────────────────────
 
 function FlowArc({
-  d, flow, color, reduceMotion, labelPos, duration = 2.5, onActivate, isActive,
+  d, flow, color, reduceMotion, labelPos, duration = 2.5, onActivate, isActive, reverse,
 }: {
   d: string;
   flow: FlowSpec;
@@ -202,13 +203,20 @@ function FlowArc({
   duration?: number;
   onActivate: () => void;
   isActive: boolean;
+  reverse?: boolean;
 }) {
-  // Hide entirely if below threshold.
-  if (flow.intensity < T_VISIBLE) return null;
+  // Below threshold: render thin grey ghost line so the diagram structure
+  // stays visible (user reads "system connected, just no flow right now").
+  if (flow.intensity < T_VISIBLE) {
+    return (
+      <g>
+        <path d={d} stroke={COLORS.inactive} strokeWidth={1.2} strokeLinecap="round" fill="none" opacity={0.6} />
+      </g>
+    );
+  }
 
   const sw = strokeWidth(flow.intensity);
   const dots = !reduceMotion ? dotCount(flow.intensity) : 0;
-  const reverse = flow.reverse === true;
   const showTrend = flow.trend != null;
   const labelHeight = showTrend ? 30 : 20;
   const labelY = labelPos.y - 11;
@@ -246,34 +254,15 @@ function FlowArc({
             stroke={isActive ? color : "#e4e4e7"}
             strokeWidth={isActive ? 1.5 : 0.5}
           />
-          <text
-            x={labelPos.x}
-            y={showTrend ? labelPos.y - 1 : labelPos.y + 1}
-            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-            fontSize="11"
-            fontWeight="600"
-            fill={color}
-            textAnchor={labelPos.anchor}
-            dominantBaseline="middle"
-          >
+          <text x={labelPos.x} y={showTrend ? labelPos.y - 1 : labelPos.y + 1}
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="11" fontWeight="600"
+            fill={color} textAnchor={labelPos.anchor} dominantBaseline="middle">
             {flow.label}
           </text>
           {showTrend && flow.trend ? (
-            <text
-              x={labelPos.x}
-              y={trendY}
-              fontFamily="ui-sans-serif, system-ui"
-              fontSize="9"
-              fontWeight="500"
-              fill="#71717a"
-              textAnchor={labelPos.anchor}
-              dominantBaseline="middle"
-            >
-              {flow.trend.pct == null
-                ? "—"
-                : Math.abs(flow.trend.pct) < 0.5
-                  ? "≈"
-                  : `${flow.trend.pct > 0 ? "↑" : "↓"} ${fmtTrendPct(flow.trend.pct)}`}
+            <text x={labelPos.x} y={trendY} fontFamily="ui-sans-serif, system-ui" fontSize="9" fontWeight="500"
+              fill="#71717a" textAnchor={labelPos.anchor} dominantBaseline="middle">
+              {flow.trend.pct == null ? "—" : Math.abs(flow.trend.pct) < 0.5 ? "≈" : `${flow.trend.pct > 0 ? "↑" : "↓"} ${fmtTrendPct(flow.trend.pct)}`}
             </text>
           ) : null}
         </g>
@@ -293,6 +282,7 @@ function NodeCard({
   accentColor: string;
   compact?: boolean;
 }) {
+  const valueColor = spec.highlighted ? accentColor : spec.dim ? "#a1a1aa" : "#3f3f46";
   return (
     <motion.div
       className={cn("rounded-2xl border bg-white border-ink-200/60 overflow-hidden", compact ? "p-2.5" : "p-3", "shadow-card")}
@@ -304,32 +294,44 @@ function NodeCard({
       }}
       transition={{ duration: 0.6 }}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <div
           className={cn("flex shrink-0 items-center justify-center rounded-lg", compact ? "h-6 w-6" : "h-7 w-7")}
-          style={{ background: `${accentColor}15`, color: accentColor }}
+          style={{
+            background: spec.dim ? `${accentColor}10` : `${accentColor}15`,
+            color: spec.dim ? "#a1a1aa" : accentColor,
+          }}
         >
           {icon}
         </div>
-        <span className={cn("font-medium uppercase tracking-wide text-ink-500", compact ? "text-[10px]" : "text-xs")}>
+        <span className={cn("font-medium uppercase tracking-wide", spec.dim ? "text-ink-400" : "text-ink-500", compact ? "text-[10px]" : "text-xs")}>
           {label}
         </span>
+        {spec.info ? (
+          <InfoTooltip
+            title={spec.info.title}
+            formula={spec.info.formula}
+            description={spec.info.description}
+          />
+        ) : null}
       </div>
       <div
         className={cn(
           "mt-1 font-mono font-semibold tabular-nums leading-tight whitespace-nowrap",
           compact ? "text-[15px]" : "text-lg",
         )}
-        style={{ color: spec.highlighted ? accentColor : "#18181b" }}
+        style={{ color: valueColor }}
       >
-        {spec.big}
+        <NumberWithUnit value={spec.big} />
       </div>
       {spec.small ? (
-        <div className="mt-0.5 text-[11px] leading-tight text-ink-500 truncate">{spec.small}</div>
+        <div className={cn("mt-0.5 text-[11px] leading-tight truncate", spec.dim ? "text-ink-300" : "text-ink-500")}>
+          {spec.small}
+        </div>
       ) : null}
       {spec.trend ? (
         <div className="mt-0.5">
-          <TrendInline trend={spec.trend} />
+          <TrendInline trend={spec.trend} dim={spec.dim} />
         </div>
       ) : null}
     </motion.div>
