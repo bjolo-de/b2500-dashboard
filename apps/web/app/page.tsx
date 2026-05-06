@@ -175,8 +175,12 @@ function buildAggregateDiagram(
   const exporting = netSaldoKwh < -0.001;
   const importing = netSaldoKwh > 0.001;
 
-  const tr = (cur: number, prv: number | null | undefined): Trend | undefined =>
-    prv == null ? undefined : trendOf(cur, prv, vs);
+  // Always return a Trend so the line/module renders the trend slot (with "—"
+  // when prev is unavailable). Keeps visual consistency across all flows.
+  const tr = (cur: number, prv: number | null | undefined): Trend => {
+    if (prv == null) return { pct: null, vs };
+    return trendOf(cur, prv, vs);
+  };
 
   // Speicher: cycles = (charged + discharged) / (2 * capacity).
   const socRange =
@@ -194,7 +198,8 @@ function buildAggregateDiagram(
       battery: {
         big: `${fmtCycles(agg.cyclesEquivalent)} Zyklen`,
         small: socRange,
-        trend: tr(agg.cyclesEquivalent, prev?.cyclesEquivalent),
+        // Trend on cycle count is hard to interpret — drop it for parity with
+        // the other modules (each shows big + one secondary line).
         highlighted: agg.cyclesEquivalent > 0.005,
         dim: agg.cyclesEquivalent < 0.005,
         info: {
@@ -269,7 +274,7 @@ export default async function Page({
   ]);
   const health = classifyHealth(heartbeats);
 
-  // ─── Live tab: minimal page, only "right now" ────────────────────────────
+  // ─── Live tab ───────────────────────────────────────────────────────────
   if (period === "live") {
     const todayRange = rangeFor("today", new Date());
     const [latestShelly, latestMarstek, todayShelly, todayMarstek] = await Promise.all([
@@ -287,6 +292,7 @@ export default async function Page({
         .reverse()[0] ?? null;
 
     const diagram = buildLiveDiagram(live, todayAgg);
+    const todayPoints = mergeTimeSeries(todayShelly, todayMarstek);
 
     return (
       <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -321,6 +327,22 @@ export default async function Page({
             />
           </CardBody>
         </Card>
+
+        <Card className="mt-4">
+          <CardHeader>
+            <CardLabel>Verlauf heute</CardLabel>
+          </CardHeader>
+          <CardBody>
+            <MainChart points={todayPoints} />
+            <div className="mt-3">
+              <MainChartLegend />
+            </div>
+          </CardBody>
+        </Card>
+
+        <div className="mt-4">
+          <BalanceSummary agg={todayAgg} period="today" />
+        </div>
 
         <TariffFooter settings={settings} />
       </main>

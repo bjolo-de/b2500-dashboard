@@ -285,7 +285,7 @@ function NodeCard({
   const valueColor = spec.highlighted ? accentColor : spec.dim ? "#a1a1aa" : "#3f3f46";
   return (
     <motion.div
-      className={cn("rounded-2xl border bg-white border-ink-200/60 overflow-hidden", compact ? "p-2.5" : "p-3", "shadow-card")}
+      className={cn("rounded-2xl border bg-white border-ink-200/60", compact ? "p-2.5" : "p-3", "shadow-card")}
       style={style}
       animate={{
         boxShadow: spec.highlighted
