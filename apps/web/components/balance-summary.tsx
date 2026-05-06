@@ -14,6 +14,8 @@ type Props = {
   period: "today" | "week" | "month";
 };
 
+
+
 export function BalanceSummary({ agg, period }: Props) {
   const label = PERIOD_LABEL[period] ?? "im Zeitraum";
 

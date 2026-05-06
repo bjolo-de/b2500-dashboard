@@ -4,10 +4,10 @@ import { useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Period } from "@/lib/period";
+import type { AggregatePeriod } from "@/lib/period";
 
 type Props = {
-  period: Period;
+  period: AggregatePeriod;
   label: string;
   prevAnchorParam: string;
   nextAnchorParam: string;

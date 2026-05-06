@@ -25,6 +25,9 @@ export type PeriodAggregates = {
   socMinPct: number | null;
   socMaxPct: number | null;
   socEndPct: number | null;
+  // Battery activity
+  /** Equivalent full cycles over the period: (charged + discharged) / (2 × capacity). */
+  cyclesEquivalent: number;
   // KPIs
   selfConsumptionPct: number | null;
   autarkyPct: number | null;
@@ -119,6 +122,10 @@ export function computePeriodAggregates(
   const socMaxPct = socs.length ? Math.max(...socs) : null;
   const socEndPct = socs.length ? socs[socs.length - 1] : null;
 
+  const totalThroughputKwh = (pvToBatteryWh + batteryToHomeWh) / 1000;
+  const cyclesEquivalent =
+    totalThroughputKwh / (2 * (BATTERY_CAPACITY_WH / 1000));
+
   return {
     pvProducedKwh: pvWh / 1000,
     consumptionKwh: consumptionWh / 1000,
@@ -135,6 +142,7 @@ export function computePeriodAggregates(
     socMinPct,
     socMaxPct,
     socEndPct,
+    cyclesEquivalent,
     selfConsumptionPct,
     autarkyPct,
     costAvoidedEur: selfUsedKwh * (energyCt / 100),

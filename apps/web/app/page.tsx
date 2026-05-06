@@ -16,7 +16,14 @@ import {
 import { classifyHealth } from "@/lib/system-health";
 import { mergeTimeSeries, dailySocBands, bucketTimeSeries } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
-import { parseAnchor, rangeFor, type Period, type Range } from "@/lib/period";
+import {
+  AGGREGATE_PERIODS,
+  parseAnchor,
+  rangeFor,
+  type AggregatePeriod,
+  type Period,
+  type Range,
+} from "@/lib/period";
 import { Card, CardBody, CardHeader, CardLabel } from "@/components/ui/card";
 import { PeriodSwitcher } from "@/components/period-switcher";
 import { DateNavigator } from "@/components/date-navigator";
@@ -35,23 +42,23 @@ import { AutoRefresh } from "@/components/auto-refresh";
 
 export const revalidate = 30;
 
-const VALID_PERIODS = new Set<Period>(["today", "week", "month"]);
+const VALID_PERIODS = new Set<Period>(["live", "today", "week", "month"]);
 
 function asPeriod(s: string | string[] | undefined): Period {
   const v = Array.isArray(s) ? s[0] : s;
-  return VALID_PERIODS.has(v as Period) ? (v as Period) : "today";
+  return VALID_PERIODS.has(v as Period) ? (v as Period) : "live";
 }
 function asAnchor(s: string | string[] | undefined): string | undefined {
   return Array.isArray(s) ? s[0] : s;
 }
 
-const TREND_VS: Record<Period, string> = {
+const TREND_VS: Record<AggregatePeriod, string> = {
   today: "Vortag",
   week: "Vorwoche",
   month: "Vormonat",
 };
-const SCALE_KWH: Record<Period, number> = { today: 5, week: 15, month: 60 };
-const BUCKET_MS: Record<Period, number> = {
+const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
+const BUCKET_MS: Record<AggregatePeriod, number> = {
   today: 0,
   week:  60 * 60 * 1000,
   month: 4 * 60 * 60 * 1000,
@@ -75,6 +82,11 @@ function fmtSignedW(w: number | null): string {
 function fmtSignedKwh(kwh: number, digits = 2): string {
   const sign = kwh > 0 ? "+" : kwh < 0 ? "−" : "";
   return `${sign}${Math.abs(kwh).toFixed(digits).replace(".", ",")} kWh`;
+}
+function fmtCycles(c: number): string {
+  if (c < 10) return c.toFixed(2).replace(".", ",");
+  if (c < 100) return c.toFixed(1).replace(".", ",");
+  return Math.round(c).toString();
 }
 
 function trendOf(cur: number, prev: number, vs: string): Trend {
@@ -129,12 +141,10 @@ function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
         intensity: intW(live.batteryToHomeW),
         label: live.batteryToHomeW >= 1 ? fmtW(live.batteryToHomeW) : "",
       },
-      // Wohnung → Netz (export)
       homeGrid: {
         intensity: intW(exportingW),
         label: exportingW >= 1 ? fmtW(exportingW) : "",
       },
-      // Netz → Wohnung (import)
       gridHome: {
         intensity: intW(importingW),
         label: importingW >= 1 ? fmtW(importingW) : "",
@@ -155,18 +165,24 @@ function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
 function buildAggregateDiagram(
   agg: PeriodAggregates,
   prev: PeriodAggregates | null,
-  period: Period,
+  period: AggregatePeriod,
 ) {
   const scale = SCALE_KWH[period];
   const intK = (kwh: number) => Math.min(1, kwh / scale);
   const vs = TREND_VS[period];
 
-  const netSaldoKwh = agg.importKwh - agg.exportKwh; // + = bezug, − = einspeisung
+  const netSaldoKwh = agg.importKwh - agg.exportKwh;
   const exporting = netSaldoKwh < -0.001;
   const importing = netSaldoKwh > 0.001;
 
   const tr = (cur: number, prv: number | null | undefined): Trend | undefined =>
     prv == null ? undefined : trendOf(cur, prv, vs);
+
+  // Speicher: cycles = (charged + discharged) / (2 * capacity).
+  const socRange =
+    agg.socMinPct != null && agg.socMaxPct != null
+      ? `${agg.socMinPct}–${agg.socMaxPct} % SOC`
+      : undefined;
 
   return {
     modules: {
@@ -176,14 +192,10 @@ function buildAggregateDiagram(
         highlighted: agg.pvProducedKwh > 0.01,
       },
       battery: {
-        // primary = energy delivered from battery to home (the user-visible value)
-        big: fmtKwh(agg.batteryDischargedKwh),
-        small:
-          agg.batteryChargedKwh > 0.01
-            ? `${fmtKwh(agg.batteryChargedKwh)} geladen`
-            : undefined,
-        trend: tr(agg.batteryDischargedKwh, prev?.batteryDischargedKwh),
-        highlighted: agg.batteryChargedKwh + agg.batteryDischargedKwh > 0.01,
+        big: `${fmtCycles(agg.cyclesEquivalent)} Zyklen`,
+        small: socRange,
+        trend: tr(agg.cyclesEquivalent, prev?.cyclesEquivalent),
+        highlighted: agg.cyclesEquivalent > 0.005,
       },
       home: {
         big: fmtKwh(agg.consumptionKwh),
@@ -192,7 +204,6 @@ function buildAggregateDiagram(
       },
       grid: {
         big: fmtSignedKwh(netSaldoKwh),
-        // Subtitle removed — bezug/einspeisung now visible as the two arrow flows.
         trend: tr(netSaldoKwh, prev != null ? (prev.importKwh - prev.exportKwh) : null),
         highlighted: agg.importKwh + agg.exportKwh > 0.01,
         variant: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
@@ -214,7 +225,6 @@ function buildAggregateDiagram(
         label: agg.batteryToHomeKwh >= 0.01 ? fmtKwh(agg.batteryToHomeKwh) : "",
         trend: tr(agg.batteryToHomeKwh, prev?.batteryToHomeKwh),
       },
-      // Two separate flows for the grid: each visible if its direction occurred.
       homeGrid: {
         intensity: intK(agg.exportKwh),
         label: agg.exportKwh >= 0.01 ? fmtKwh(agg.exportKwh) : "",
@@ -245,50 +255,108 @@ export default async function Page({
 }) {
   const params = await searchParams;
   const period = asPeriod(params.p);
-  const anchor = parseAnchor(period, asAnchor(params.d));
-  const range: Range = rangeFor(period, anchor);
-  const isLiveView = period === "today" && range.isCurrent;
 
-  const prevRange = isLiveView ? null : rangeFor(period, range.prevAnchor);
-
-  const [shelly, marstek, settings, heartbeats, prevShelly, prevMarstek] = await Promise.all([
-    fetchShellyRange(range.from, range.to),
-    fetchMarstekRange(range.from, range.to),
+  const [settings, heartbeats] = await Promise.all([
     fetchUserSettings(),
     fetchHeartbeats(),
-    prevRange ? fetchShellyRange(prevRange.from, prevRange.to) : Promise.resolve(null),
-    prevRange ? fetchMarstekRange(prevRange.from, prevRange.to) : Promise.resolve(null),
   ]);
+  const health = classifyHealth(heartbeats);
 
-  const periodAgg = computePeriodAggregates(shelly, marstek, settings);
-  const prevAgg =
-    prevShelly && prevMarstek
-      ? computePeriodAggregates(prevShelly, prevMarstek, settings)
-      : null;
-
-  let live: LiveState | null = null;
-  let lastUpdate: string | null = null;
-  if (isLiveView) {
-    const [latestShelly, latestMarstek] = await Promise.all([
+  // ─── Live tab: minimal page, only "right now" ────────────────────────────
+  if (period === "live") {
+    const todayRange = rangeFor("today", new Date());
+    const [latestShelly, latestMarstek, todayShelly, todayMarstek] = await Promise.all([
       fetchLatestShelly(),
       fetchLatestMarstek(),
+      fetchShellyRange(todayRange.from, todayRange.to),
+      fetchMarstekRange(todayRange.from, todayRange.to),
     ]);
-    live = deriveLive(latestShelly, latestMarstek, latestMarstek?.raw ?? null);
-    lastUpdate =
+    const live = deriveLive(latestShelly, latestMarstek, latestMarstek?.raw ?? null);
+    const todayAgg = computePeriodAggregates(todayShelly, todayMarstek, settings);
+    const lastUpdate =
       [latestShelly?.ts, latestMarstek?.ts]
         .filter((x): x is string => Boolean(x))
         .sort()
         .reverse()[0] ?? null;
+
+    const diagram = buildLiveDiagram(live, todayAgg);
+
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
+        <AutoRefresh intervalSec={30} />
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-ink-900">
+              B2500 Energy
+            </h1>
+            {lastUpdate ? (
+              <div className="mt-0.5 text-xs text-ink-500">
+                Aktualisiert {formatRelative(lastUpdate)}
+              </div>
+            ) : null}
+          </div>
+          <PeriodSwitcher />
+        </header>
+
+        <div className="mt-3">
+          <SystemStatus items={health} />
+        </div>
+
+        <Card className="mt-5">
+          <CardHeader>
+            <CardLabel>Energiefluss jetzt</CardLabel>
+          </CardHeader>
+          <CardBody>
+            <FlowDiagram
+              modules={diagram.modules}
+              flows={diagram.flows}
+              tooltips={diagram.tooltips}
+            />
+          </CardBody>
+        </Card>
+
+        <TariffFooter settings={settings} />
+      </main>
+    );
   }
 
-  const diagram = isLiveView && live
-    ? buildLiveDiagram(live, periodAgg)
-    : buildAggregateDiagram(periodAgg, prevAgg, period);
+  // ─── Aggregate tabs (today / week / month) ────────────────────────────────
+  const aggPeriod = period as AggregatePeriod;
+  const anchor = parseAnchor(aggPeriod, asAnchor(params.d));
+  const range: Range = rangeFor(aggPeriod, anchor);
+
+  // Previous-period range for trend. For current (in-progress) periods we
+  // match elapsed time so the comparison is fair (e.g., today 09:00 vs
+  // yesterday 00:00–09:00, not yesterday's full day).
+  const fullPrev = rangeFor(aggPeriod, range.prevAnchor);
+  const elapsedMs = range.isCurrent
+    ? Math.min(
+        Date.now() - range.from.getTime(),
+        range.to.getTime() - range.from.getTime(),
+      )
+    : range.to.getTime() - range.from.getTime();
+  const prevRange = {
+    from: fullPrev.from,
+    to: range.isCurrent
+      ? new Date(fullPrev.from.getTime() + elapsedMs)
+      : fullPrev.to,
+  };
+
+  const [shelly, marstek, prevShelly, prevMarstek] = await Promise.all([
+    fetchShellyRange(range.from, range.to),
+    fetchMarstekRange(range.from, range.to),
+    fetchShellyRange(prevRange.from, prevRange.to),
+    fetchMarstekRange(prevRange.from, prevRange.to),
+  ]);
+
+  const periodAgg = computePeriodAggregates(shelly, marstek, settings);
+  const prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
+
+  const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod);
 
   const allPoints = mergeTimeSeries(shelly, marstek);
-  const points = bucketTimeSeries(allPoints, BUCKET_MS[period]);
+  const points = bucketTimeSeries(allPoints, BUCKET_MS[aggPeriod]);
   const bands = dailySocBands(marstek);
-  const health = classifyHealth(heartbeats);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -298,11 +366,6 @@ export default async function Page({
           <h1 className="text-xl font-semibold tracking-tight text-ink-900">
             B2500 Energy
           </h1>
-          {isLiveView && lastUpdate ? (
-            <div className="mt-0.5 text-xs text-ink-500">
-              Aktualisiert {formatRelative(lastUpdate)}
-            </div>
-          ) : null}
         </div>
         <PeriodSwitcher />
       </header>
@@ -313,10 +376,10 @@ export default async function Page({
 
       <div className="mt-5">
         <DateNavigator
-          period={period}
+          period={aggPeriod}
           label={range.label}
-          prevAnchorParam={rangeFor(period, range.prevAnchor).anchorParam}
-          nextAnchorParam={rangeFor(period, range.nextAnchor).anchorParam}
+          prevAnchorParam={rangeFor(aggPeriod, range.prevAnchor).anchorParam}
+          nextAnchorParam={rangeFor(aggPeriod, range.nextAnchor).anchorParam}
           hasNext={range.hasNext}
           isCurrent={range.isCurrent}
         />
@@ -324,7 +387,7 @@ export default async function Page({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardLabel>{isLiveView ? "Energiefluss jetzt" : `Energiefluss ${range.shortLabel}`}</CardLabel>
+          <CardLabel>Energiefluss {range.shortLabel}</CardLabel>
         </CardHeader>
         <CardBody>
           <FlowDiagram
@@ -338,7 +401,7 @@ export default async function Page({
       <Card className="mt-4">
         <CardHeader>
           <CardLabel>
-            {period === "today" ? "Verlauf" : period === "week" ? "Wochenverlauf (1h-Buckets)" : "Monatsverlauf (4h-Buckets)"}
+            {aggPeriod === "today" ? "Verlauf" : aggPeriod === "week" ? "Wochenverlauf (1h-Buckets)" : "Monatsverlauf (4h-Buckets)"}
           </CardLabel>
         </CardHeader>
         <CardBody>
@@ -349,7 +412,7 @@ export default async function Page({
         </CardBody>
       </Card>
 
-      {period !== "today" ? (
+      {aggPeriod !== "today" ? (
         <Card className="mt-4">
           <CardHeader>
             <CardLabel>Speicher SOC (Tages-Min/Max)</CardLabel>
@@ -361,7 +424,7 @@ export default async function Page({
       ) : null}
 
       <div className="mt-4">
-        <BalanceSummary agg={periodAgg} period={period} />
+        <BalanceSummary agg={periodAgg} period={aggPeriod} />
       </div>
 
       <TariffFooter settings={settings} />

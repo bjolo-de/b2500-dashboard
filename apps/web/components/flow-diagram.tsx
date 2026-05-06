@@ -53,20 +53,29 @@ const DESKTOP: Total & { cards: Cards } = {
   },
 };
 const DA = anchors(DESKTOP.cards);
+// Desktop grid paths use upper / lower tracks of each card's edge so the two
+// flows occupy disjoint vertical bands and never visually cross.
+const D_HOME_RIGHT_X = DA.homeRight.x;
+const D_GRID_LEFT_X = DA.gridLeft.x;
+const D_HOME_TOP_Y = DESKTOP.cards.home.y;
+const D_HOME_BOT_Y = DESKTOP.cards.home.y + DESKTOP.cards.home.h;
+const D_GRID_TOP_Y = DESKTOP.cards.grid.y;
+const D_GRID_BOT_Y = DESKTOP.cards.grid.y + DESKTOP.cards.grid.h;
 const DESKTOP_PATHS: Paths = {
   pvHome:      `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.homeLeft.x) / 2} ${DA.homeLeft.y}, ${DA.homeLeft.x} ${DA.homeLeft.y}`,
   pvBattery:   `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.batteryLeft.x) / 2} ${DA.batteryLeft.y}, ${DA.batteryLeft.x} ${DA.batteryLeft.y}`,
   batteryHome: `M ${DA.batteryTop.x} ${DA.batteryTop.y} L ${DA.homeBottom.x} ${DA.homeBottom.y}`,
-  // Two parallel arcs between Wohnung and Netz: export curves up, import curves down.
-  homeGrid:    `M ${DA.homeRight.x} ${DA.homeRight.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.homeRight.y - 24}, ${DA.gridLeft.x} ${DA.gridLeft.y}`,
-  gridHome:    `M ${DA.gridLeft.x} ${DA.gridLeft.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.gridLeft.y + 24}, ${DA.homeRight.x} ${DA.homeRight.y}`,
+  // Export: home upper-right → grid upper-left (top track)
+  homeGrid:    `M ${D_HOME_RIGHT_X} ${D_HOME_TOP_Y + 25} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_HOME_TOP_Y + D_GRID_TOP_Y + 25) / 2 - 4}, ${D_GRID_LEFT_X} ${D_GRID_TOP_Y + 25}`,
+  // Import: grid lower-left → home lower-right (bottom track)
+  gridHome:    `M ${D_GRID_LEFT_X} ${D_GRID_BOT_Y - 25} Q ${(D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2} ${(D_GRID_BOT_Y + D_HOME_BOT_Y - 25) / 2 + 4}, ${D_HOME_RIGHT_X} ${D_HOME_BOT_Y - 25}`,
 };
 const DESKTOP_LABELS: Labels = {
   pvHome:      { x: (DA.pvRight.x + DA.homeLeft.x) / 2,    y: (DA.pvRight.y + DA.homeLeft.y) / 2 - 16, anchor: "middle" },
   pvBattery:   { x: (DA.pvRight.x + DA.batteryLeft.x) / 2, y: (DA.pvRight.y + DA.batteryLeft.y) / 2 + 18, anchor: "middle" },
   batteryHome: { x: DA.batteryTop.x + 14,                  y: (DA.batteryTop.y + DA.homeBottom.y) / 2 - 6, anchor: "start" },
-  homeGrid:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: DA.homeRight.y - 26, anchor: "middle" },
-  gridHome:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: DA.gridLeft.y + 28,  anchor: "middle" },
+  homeGrid:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_HOME_TOP_Y + D_GRID_TOP_Y) / 2 + 4,   anchor: "middle" },
+  gridHome:    { x: (D_HOME_RIGHT_X + D_GRID_LEFT_X) / 2,  y: (D_GRID_BOT_Y + D_HOME_BOT_Y) / 2 - 12,  anchor: "middle" },
 };
 
 // Mobile: widen the gap between Speicher and Wohnung so the batteryHome
@@ -81,20 +90,30 @@ const MOBILE: Total & { cards: Cards } = {
   },
 };
 const MA = anchors(MOBILE.cards);
+// Wohnung occupies right half of the bottom row, Netz centred at bottom.
+// Place the two grid paths on disjoint x-bands: export on the left half,
+// import on the right half. They never cross.
+const M_HOME_BOT_Y = MOBILE.cards.home.y + MOBILE.cards.home.h;       // 284
+const M_GRID_TOP_Y = MOBILE.cards.grid.y;                              // 372
+const M_HOME_LEFT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.25;   // 255
+const M_HOME_RIGHT_Q = MOBILE.cards.home.x + MOBILE.cards.home.w * 0.75;  // 317
+const M_GRID_LEFT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.25;   // 140
+const M_GRID_RIGHT_Q = MOBILE.cards.grid.x + MOBILE.cards.grid.w * 0.75;  // 220
 const MOBILE_PATHS: Paths = {
   pvBattery:   `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x - 50} ${(MA.pvBottom.y + MA.batteryTop.y) / 2}, ${MA.batteryTop.x} ${MA.batteryTop.y}`,
   pvHome:      `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x + 50} ${(MA.pvBottom.y + MA.homeTop.y) / 2}, ${MA.homeTop.x} ${MA.homeTop.y}`,
   batteryHome: `M ${MA.batteryRight.x} ${MA.batteryRight.y} L ${MA.homeLeft.x} ${MA.homeLeft.y}`,
-  // Dual paths for grid: export curves left, import curves right.
-  homeGrid:    `M ${MA.homeBottom.x} ${MA.homeBottom.y} Q ${MA.homeBottom.x - 50} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.gridTop.x} ${MA.gridTop.y}`,
-  gridHome:    `M ${MA.gridTop.x} ${MA.gridTop.y} Q ${MA.gridTop.x + 50} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.homeBottom.x} ${MA.homeBottom.y}`,
+  // Export: home bottom-left → grid top-left (left half)
+  homeGrid:    `M ${M_HOME_LEFT_Q} ${M_HOME_BOT_Y} Q ${(M_HOME_LEFT_Q + M_GRID_LEFT_Q) / 2 - 8} ${(M_HOME_BOT_Y + M_GRID_TOP_Y) / 2}, ${M_GRID_LEFT_Q} ${M_GRID_TOP_Y}`,
+  // Import: grid top-right → home bottom-right (right half)
+  gridHome:    `M ${M_GRID_RIGHT_Q} ${M_GRID_TOP_Y} Q ${(M_HOME_RIGHT_Q + M_GRID_RIGHT_Q) / 2 + 8} ${(M_HOME_BOT_Y + M_GRID_TOP_Y) / 2}, ${M_HOME_RIGHT_Q} ${M_HOME_BOT_Y}`,
 };
 const MOBILE_LABELS: Labels = {
   pvBattery:   { x: MA.batteryTop.x + 28, y: (MA.pvBottom.y + MA.batteryTop.y) / 2 - 16, anchor: "start" },
   pvHome:      { x: MA.homeTop.x - 28,    y: (MA.pvBottom.y + MA.homeTop.y) / 2 - 16,    anchor: "end" },
   batteryHome: { x: (MA.batteryRight.x + MA.homeLeft.x) / 2, y: MA.batteryRight.y - 14, anchor: "middle" },
-  homeGrid:    { x: MA.homeBottom.x - 36, y: (MA.homeBottom.y + MA.gridTop.y) / 2,        anchor: "end" },
-  gridHome:    { x: MA.gridTop.x + 36,    y: (MA.homeBottom.y + MA.gridTop.y) / 2,        anchor: "start" },
+  homeGrid:    { x: (M_HOME_LEFT_Q + M_GRID_LEFT_Q) / 2 - 4,   y: (M_HOME_BOT_Y + M_GRID_TOP_Y) / 2 - 12, anchor: "middle" },
+  gridHome:    { x: (M_HOME_RIGHT_Q + M_GRID_RIGHT_Q) / 2 + 4, y: (M_HOME_BOT_Y + M_GRID_TOP_Y) / 2 - 12, anchor: "middle" },
 };
 
 function strokeWidth(intensity: number) {

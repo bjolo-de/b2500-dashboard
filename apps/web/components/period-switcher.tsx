@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const PERIODS = [
-  { key: "today", label: "Heute" },
+  { key: "live", label: "Live" },
+  { key: "today", label: "Tag" },
   { key: "week", label: "Woche" },
   { key: "month", label: "Monat" },
 ] as const;
@@ -13,14 +14,14 @@ const PERIODS = [
 export function PeriodSwitcher() {
   const router = useRouter();
   const params = useSearchParams();
-  const current = params.get("p") ?? "today";
+  const current = params.get("p") ?? "live";
   const [pending, startTransition] = useTransition();
 
   function pick(key: string) {
     if (key === current) return;
     const next = new URLSearchParams(params);
     next.set("p", key);
-    next.delete("d");  // reset date anchor when period changes
+    next.delete("d");
     startTransition(() => {
       router.push(`/?${next.toString()}`);
     });

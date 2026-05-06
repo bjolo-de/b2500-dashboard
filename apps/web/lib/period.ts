@@ -18,7 +18,9 @@ import {
 } from "date-fns";
 import { de } from "date-fns/locale";
 
-export type Period = "today" | "week" | "month";
+export type Period = "live" | "today" | "week" | "month";
+
+export const AGGREGATE_PERIODS = new Set<Period>(["today", "week", "month"]);
 
 export type Range = {
   from: Date;
@@ -34,7 +36,9 @@ export type Range = {
 
 const WEEK_OPTS = { weekStartsOn: 1 as const };  // ISO: Monday
 
-export function parseAnchor(period: Period, dParam: string | undefined): Date {
+export type AggregatePeriod = Exclude<Period, "live">;
+
+export function parseAnchor(period: AggregatePeriod, dParam: string | undefined): Date {
   if (!dParam) return new Date();
   try {
     if (period === "today") {
@@ -61,7 +65,7 @@ export function parseAnchor(period: Period, dParam: string | undefined): Date {
   return new Date();
 }
 
-export function rangeFor(period: Period, anchor: Date): Range {
+export function rangeFor(period: AggregatePeriod, anchor: Date): Range {
   const now = new Date();
   switch (period) {
     case "today": {
@@ -124,6 +128,6 @@ export function rangeFor(period: Period, anchor: Date): Range {
   }
 }
 
-export function formatAnchorParam(period: Period, anchor: Date): string {
+export function formatAnchorParam(period: AggregatePeriod, anchor: Date): string {
   return rangeFor(period, anchor).anchorParam;
 }
