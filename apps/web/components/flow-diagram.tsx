@@ -22,10 +22,10 @@ type Card = { x: number; y: number; w: number; h: number };
 type Cards = { pv: Card; battery: Card; home: Card; grid: Card };
 type Anchor = "start" | "middle" | "end";
 type LabelPos = { x: number; y: number; anchor: Anchor };
+type Total = { W: number; H: number };
+type FlowKey = "pvHome" | "pvBattery" | "batteryHome" | "homeGrid" | "gridHome";
 type Paths = Record<FlowKey, string>;
 type Labels = Record<FlowKey, LabelPos>;
-type Total = { W: number; H: number };
-type FlowKey = "pvHome" | "pvBattery" | "batteryHome" | "homeGrid";
 
 function anchors(c: Cards) {
   return {
@@ -57,42 +57,49 @@ const DESKTOP_PATHS: Paths = {
   pvHome:      `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.homeLeft.x) / 2} ${DA.homeLeft.y}, ${DA.homeLeft.x} ${DA.homeLeft.y}`,
   pvBattery:   `M ${DA.pvRight.x} ${DA.pvRight.y} Q ${(DA.pvRight.x + DA.batteryLeft.x) / 2} ${DA.batteryLeft.y}, ${DA.batteryLeft.x} ${DA.batteryLeft.y}`,
   batteryHome: `M ${DA.batteryTop.x} ${DA.batteryTop.y} L ${DA.homeBottom.x} ${DA.homeBottom.y}`,
-  homeGrid:    `M ${DA.homeRight.x} ${DA.homeRight.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.gridLeft.y}, ${DA.gridLeft.x} ${DA.gridLeft.y}`,
+  // Two parallel arcs between Wohnung and Netz: export curves up, import curves down.
+  homeGrid:    `M ${DA.homeRight.x} ${DA.homeRight.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.homeRight.y - 24}, ${DA.gridLeft.x} ${DA.gridLeft.y}`,
+  gridHome:    `M ${DA.gridLeft.x} ${DA.gridLeft.y} Q ${(DA.homeRight.x + DA.gridLeft.x) / 2} ${DA.gridLeft.y + 24}, ${DA.homeRight.x} ${DA.homeRight.y}`,
 };
 const DESKTOP_LABELS: Labels = {
   pvHome:      { x: (DA.pvRight.x + DA.homeLeft.x) / 2,    y: (DA.pvRight.y + DA.homeLeft.y) / 2 - 16, anchor: "middle" },
   pvBattery:   { x: (DA.pvRight.x + DA.batteryLeft.x) / 2, y: (DA.pvRight.y + DA.batteryLeft.y) / 2 + 18, anchor: "middle" },
   batteryHome: { x: DA.batteryTop.x + 14,                  y: (DA.batteryTop.y + DA.homeBottom.y) / 2 - 6, anchor: "start" },
-  homeGrid:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: (DA.homeRight.y + DA.gridLeft.y) / 2 - 16, anchor: "middle" },
+  homeGrid:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: DA.homeRight.y - 26, anchor: "middle" },
+  gridHome:    { x: (DA.homeRight.x + DA.gridLeft.x) / 2,  y: DA.gridLeft.y + 28,  anchor: "middle" },
 };
 
+// Mobile: widen the gap between Speicher and Wohnung so the batteryHome
+// label has clearance from the cards.
 const MOBILE: Total & { cards: Cards } = {
   W: 360, H: 500,
   cards: {
     pv:      { x: 100, y: 20,  w: 160, h: 88 },
-    battery: { x: 20,  y: 196, w: 140, h: 88 },
-    home:    { x: 200, y: 196, w: 140, h: 88 },
+    battery: { x: 12,  y: 196, w: 124, h: 88 },
+    home:    { x: 224, y: 196, w: 124, h: 88 },
     grid:    { x: 100, y: 372, w: 160, h: 88 },
   },
 };
 const MA = anchors(MOBILE.cards);
 const MOBILE_PATHS: Paths = {
-  pvBattery:   `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x - 30} ${(MA.pvBottom.y + MA.batteryTop.y) / 2}, ${MA.batteryTop.x} ${MA.batteryTop.y}`,
-  pvHome:      `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x + 30} ${(MA.pvBottom.y + MA.homeTop.y) / 2}, ${MA.homeTop.x} ${MA.homeTop.y}`,
+  pvBattery:   `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x - 50} ${(MA.pvBottom.y + MA.batteryTop.y) / 2}, ${MA.batteryTop.x} ${MA.batteryTop.y}`,
+  pvHome:      `M ${MA.pvBottom.x} ${MA.pvBottom.y} Q ${MA.pvBottom.x + 50} ${(MA.pvBottom.y + MA.homeTop.y) / 2}, ${MA.homeTop.x} ${MA.homeTop.y}`,
   batteryHome: `M ${MA.batteryRight.x} ${MA.batteryRight.y} L ${MA.homeLeft.x} ${MA.homeLeft.y}`,
-  homeGrid:    `M ${MA.homeBottom.x} ${MA.homeBottom.y} Q ${MA.homeBottom.x - 20} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.gridTop.x} ${MA.gridTop.y}`,
+  // Dual paths for grid: export curves left, import curves right.
+  homeGrid:    `M ${MA.homeBottom.x} ${MA.homeBottom.y} Q ${MA.homeBottom.x - 50} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.gridTop.x} ${MA.gridTop.y}`,
+  gridHome:    `M ${MA.gridTop.x} ${MA.gridTop.y} Q ${MA.gridTop.x + 50} ${(MA.homeBottom.y + MA.gridTop.y) / 2}, ${MA.homeBottom.x} ${MA.homeBottom.y}`,
 };
 const MOBILE_LABELS: Labels = {
-  pvBattery:   { x: MA.batteryTop.x + 26, y: (MA.pvBottom.y + MA.batteryTop.y) / 2 - 12, anchor: "start" },
-  pvHome:      { x: MA.homeTop.x - 26,    y: (MA.pvBottom.y + MA.homeTop.y) / 2 - 12,    anchor: "end" },
+  pvBattery:   { x: MA.batteryTop.x + 28, y: (MA.pvBottom.y + MA.batteryTop.y) / 2 - 16, anchor: "start" },
+  pvHome:      { x: MA.homeTop.x - 28,    y: (MA.pvBottom.y + MA.homeTop.y) / 2 - 16,    anchor: "end" },
   batteryHome: { x: (MA.batteryRight.x + MA.homeLeft.x) / 2, y: MA.batteryRight.y - 14, anchor: "middle" },
-  homeGrid:    { x: MA.homeBottom.x - 26, y: (MA.homeBottom.y + MA.gridTop.y) / 2 - 4,   anchor: "end" },
+  homeGrid:    { x: MA.homeBottom.x - 36, y: (MA.homeBottom.y + MA.gridTop.y) / 2,        anchor: "end" },
+  gridHome:    { x: MA.gridTop.x + 36,    y: (MA.homeBottom.y + MA.gridTop.y) / 2,        anchor: "start" },
 };
 
 function strokeWidth(intensity: number) {
   return Math.max(1.4, Math.min(5.5, 1 + intensity * 5));
 }
-// Always animate when visible — at low intensity 1 dot, scaling up.
 function dotCount(intensity: number) {
   if (intensity < T_VISIBLE) return 0;
   if (intensity < 0.05)      return 1;
@@ -103,9 +110,7 @@ function dotCount(intensity: number) {
 // ─── Public types ────────────────────────────────────────────────────────
 
 export type Trend = {
-  /** Percentage change vs previous period. Null = previous was zero (undefined). */
   pct: number | null;
-  /** Reference period for the label, e.g. "Vorwoche". */
   vs: string;
 };
 
@@ -121,47 +126,51 @@ export type FlowSpec = {
   intensity: number;
   label: string;
   trend?: Trend;
-  direction?: "export" | "import" | "idle";
+  /** "import" reverses dot animation direction (used when path was authored as export). */
+  reverse?: boolean;
 };
 
 type Props = {
   modules: { pv: ModuleSpec; battery: ModuleSpec; home: ModuleSpec; grid: ModuleSpec };
-  flows: { pvHome: FlowSpec; pvBattery: FlowSpec; batteryHome: FlowSpec; homeGrid: FlowSpec };
+  flows: {
+    pvHome: FlowSpec;
+    pvBattery: FlowSpec;
+    batteryHome: FlowSpec;
+    homeGrid: FlowSpec;   // Wohnung → Netz (export, blue)
+    gridHome: FlowSpec;   // Netz → Wohnung (import, red)
+  };
   tooltips: Record<FlowKey, string>;
 };
 
-// ─── Components ──────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────
 
 function fmtTrendPct(pct: number): string {
   const a = Math.abs(pct);
-  // German number format
-  const fmt = a >= 100
-    ? Math.round(a).toString()
-    : a >= 10
-      ? a.toFixed(0)
-      : a.toFixed(1).replace(".", ",");
-  return `${fmt} %`;
+  const fmt = a >= 100 ? Math.round(a).toString()
+    : a >= 10 ? a.toFixed(0)
+    : a.toFixed(1).replace(".", ",");
+  return `${fmt} %`;
 }
 
 function TrendInline({ trend }: { trend: Trend }) {
   if (trend.pct == null) {
     return (
-      <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-400">
+      <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-400" title={`vs. ${trend.vs}`}>
         <Minus size={10} strokeWidth={2.4} />
-        <span>vs. {trend.vs}</span>
       </span>
     );
   }
   const flat = Math.abs(trend.pct) < 0.5;
   const Icon = flat ? Minus : trend.pct > 0 ? ArrowUp : ArrowDown;
   return (
-    <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-500">
+    <span className="inline-flex items-center gap-0.5 text-[11px] text-ink-500" title={`vs. ${trend.vs}`}>
       <Icon size={10} strokeWidth={2.4} />
       <span className="font-mono tabular-nums">{flat ? "≈" : fmtTrendPct(trend.pct)}</span>
-      <span className="ml-0.5">vs. {trend.vs}</span>
     </span>
   );
 }
+
+// ─── Components ──────────────────────────────────────────────────────────
 
 function FlowArc({
   d, flow, color, reduceMotion, labelPos, duration = 2.5, onActivate, isActive,
@@ -175,19 +184,21 @@ function FlowArc({
   onActivate: () => void;
   isActive: boolean;
 }) {
-  const visible = flow.intensity >= T_VISIBLE;
-  const sw = visible ? strokeWidth(flow.intensity) : 1.2;
-  const stroke = visible ? color : COLORS.inactive;
-  const dots = visible && !reduceMotion ? dotCount(flow.intensity) : 0;
-  const reverse = flow.direction === "import";
-  const showTrend = visible && flow.trend != null;
+  // Hide entirely if below threshold.
+  if (flow.intensity < T_VISIBLE) return null;
+
+  const sw = strokeWidth(flow.intensity);
+  const dots = !reduceMotion ? dotCount(flow.intensity) : 0;
+  const reverse = flow.reverse === true;
+  const showTrend = flow.trend != null;
   const labelHeight = showTrend ? 30 : 20;
   const labelY = labelPos.y - 11;
   const trendY = labelPos.y + 11;
+  const labelWidth = 56;
 
   return (
     <g style={{ cursor: "pointer" }} onClick={onActivate} onMouseEnter={onActivate}>
-      <path d={d} stroke={stroke} strokeWidth={sw} strokeLinecap="round" fill="none" opacity={visible ? 1 : 0.55} />
+      <path d={d} stroke={color} strokeWidth={sw} strokeLinecap="round" fill="none" />
       <path d={d} stroke="transparent" strokeWidth={28} strokeLinecap="round" fill="none" pointerEvents="stroke" />
       {dots > 0
         ? Array.from({ length: dots }).map((_, i) => (
@@ -203,12 +214,12 @@ function FlowArc({
             </circle>
           ))
         : null}
-      {visible && flow.label ? (
+      {flow.label ? (
         <g pointerEvents="none">
           <rect
-            x={labelPos.anchor === "middle" ? labelPos.x - 32 : labelPos.anchor === "start" ? labelPos.x - 4 : labelPos.x - 60}
+            x={labelPos.anchor === "middle" ? labelPos.x - labelWidth / 2 : labelPos.anchor === "start" ? labelPos.x - 4 : labelPos.x - labelWidth + 4}
             y={labelY}
-            width={64}
+            width={labelWidth}
             height={labelHeight}
             rx={6}
             fill="white"
@@ -265,7 +276,7 @@ function NodeCard({
 }) {
   return (
     <motion.div
-      className={cn("rounded-2xl border bg-white border-ink-200/60 overflow-hidden", compact ? "p-2.5" : "p-3", "shadow-card", className)}
+      className={cn("rounded-2xl border bg-white border-ink-200/60 overflow-hidden", compact ? "p-2.5" : "p-3", "shadow-card")}
       style={style}
       animate={{
         boxShadow: spec.highlighted
@@ -281,14 +292,14 @@ function NodeCard({
         >
           {icon}
         </div>
-        <span className={cn("font-medium uppercase tracking-wide text-ink-500", compact ? "text-[11px]" : "text-xs")}>
+        <span className={cn("font-medium uppercase tracking-wide text-ink-500", compact ? "text-[10px]" : "text-xs")}>
           {label}
         </span>
       </div>
       <div
         className={cn(
           "mt-1 font-mono font-semibold tabular-nums leading-tight whitespace-nowrap",
-          compact ? "text-base" : "text-lg",
+          compact ? "text-[15px]" : "text-lg",
         )}
         style={{ color: spec.highlighted ? accentColor : "#18181b" }}
       >
@@ -316,12 +327,6 @@ export function FlowDiagram({ modules, flows, tooltips }: Props) {
     return () => clearTimeout(t);
   }, [activeFlow]);
 
-  const gridColor =
-    flows.homeGrid.direction === "export"
-      ? COLORS.gridExport
-      : flows.homeGrid.direction === "import"
-        ? COLORS.gridImport
-        : COLORS.inactive;
   const gridAccent =
     modules.grid.variant === "export"
       ? COLORS.gridExport
@@ -340,10 +345,11 @@ export function FlowDiagram({ modules, flows, tooltips }: Props) {
 
   const renderArcs = (paths: Paths, labels: Labels) => (
     <>
-      <FlowArc d={paths.pvHome}      flow={flows.pvHome}      color={COLORS.pv}      reduceMotion={reduceMotion} labelPos={labels.pvHome}      onActivate={() => setActiveFlow("pvHome")}      isActive={activeFlow === "pvHome"} />
-      <FlowArc d={paths.pvBattery}   flow={flows.pvBattery}   color={COLORS.pv}      reduceMotion={reduceMotion} labelPos={labels.pvBattery}   onActivate={() => setActiveFlow("pvBattery")}   isActive={activeFlow === "pvBattery"} duration={3} />
-      <FlowArc d={paths.batteryHome} flow={flows.batteryHome} color={COLORS.battery} reduceMotion={reduceMotion} labelPos={labels.batteryHome} onActivate={() => setActiveFlow("batteryHome")} isActive={activeFlow === "batteryHome"} />
-      <FlowArc d={paths.homeGrid}    flow={flows.homeGrid}    color={gridColor}      reduceMotion={reduceMotion} labelPos={labels.homeGrid}    onActivate={() => setActiveFlow("homeGrid")}    isActive={activeFlow === "homeGrid"} />
+      <FlowArc d={paths.pvHome}      flow={flows.pvHome}      color={COLORS.pv}         reduceMotion={reduceMotion} labelPos={labels.pvHome}      onActivate={() => setActiveFlow("pvHome")}      isActive={activeFlow === "pvHome"} />
+      <FlowArc d={paths.pvBattery}   flow={flows.pvBattery}   color={COLORS.pv}         reduceMotion={reduceMotion} labelPos={labels.pvBattery}   onActivate={() => setActiveFlow("pvBattery")}   isActive={activeFlow === "pvBattery"} duration={3} />
+      <FlowArc d={paths.batteryHome} flow={flows.batteryHome} color={COLORS.battery}    reduceMotion={reduceMotion} labelPos={labels.batteryHome} onActivate={() => setActiveFlow("batteryHome")} isActive={activeFlow === "batteryHome"} />
+      <FlowArc d={paths.homeGrid}    flow={flows.homeGrid}    color={COLORS.gridExport} reduceMotion={reduceMotion} labelPos={labels.homeGrid}    onActivate={() => setActiveFlow("homeGrid")}    isActive={activeFlow === "homeGrid"} />
+      <FlowArc d={paths.gridHome}    flow={flows.gridHome}    color={COLORS.gridImport} reduceMotion={reduceMotion} labelPos={labels.gridHome}    onActivate={() => setActiveFlow("gridHome")}    isActive={activeFlow === "gridHome"} />
     </>
   );
 

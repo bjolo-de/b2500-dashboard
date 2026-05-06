@@ -50,13 +50,7 @@ const TREND_VS: Record<Period, string> = {
   week: "Vorwoche",
   month: "Vormonat",
 };
-
-const SCALE_KWH: Record<Period, number> = {
-  today: 5,
-  week: 15,
-  month: 60,
-};
-
+const SCALE_KWH: Record<Period, number> = { today: 5, week: 15, month: 60 };
 const BUCKET_MS: Record<Period, number> = {
   today: 0,
   week:  60 * 60 * 1000,
@@ -88,13 +82,13 @@ function trendOf(cur: number, prev: number, vs: string): Trend {
   return { pct: ((cur - prev) / Math.abs(prev)) * 100, vs };
 }
 
-// ─── Live mode (current "today") ──────────────────────────────────────────
+// ─── Live mode ────────────────────────────────────────────────────────────
 
 function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
   const wScale = 800;
   const intW = (w: number) => Math.min(1, w / wScale);
-  const exporting = (live.saldoW ?? 0) < 0;
-  const importing = (live.saldoW ?? 0) > 0;
+  const exportingW = Math.max(0, -(live.saldoW ?? 0));
+  const importingW = Math.max(0, (live.saldoW ?? 0));
 
   return {
     modules: {
@@ -118,9 +112,8 @@ function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
       },
       grid: {
         big: fmtSignedW(live.saldoW),
-        small: `${fmtKwh(todayAgg.importKwh)} Bezug · ${fmtKwh(todayAgg.exportKwh)} Einsp.`,
         highlighted: Math.abs(live.saldoW ?? 0) > 1,
-        variant: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
+        variant: (exportingW > 0 ? "export" : importingW > 0 ? "import" : "idle") as "export" | "import" | "idle",
       },
     } satisfies Record<string, ModuleSpec>,
     flows: {
@@ -136,26 +129,28 @@ function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
         intensity: intW(live.batteryToHomeW),
         label: live.batteryToHomeW >= 1 ? fmtW(live.batteryToHomeW) : "",
       },
+      // Wohnung → Netz (export)
       homeGrid: {
-        intensity: intW(Math.abs(live.saldoW ?? 0)),
-        label: Math.abs(live.saldoW ?? 0) >= 1 ? fmtW(Math.abs(live.saldoW ?? 0)) : "",
-        direction: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
+        intensity: intW(exportingW),
+        label: exportingW >= 1 ? fmtW(exportingW) : "",
+      },
+      // Netz → Wohnung (import)
+      gridHome: {
+        intensity: intW(importingW),
+        label: importingW >= 1 ? fmtW(importingW) : "",
       },
     } satisfies Record<string, FlowSpec>,
     tooltips: {
       pvHome: "PV-Energie, die direkt von der Wohnung verbraucht wird (nicht über den Speicher).",
       pvBattery: "PV-Überschuss, der in den Speicher fließt zur späteren Nutzung.",
       batteryHome: "Speicher entlädt sich und versorgt die Wohnung.",
-      homeGrid: exporting
-        ? "Überschuss, der ins öffentliche Netz eingespeist wird."
-        : importing
-          ? "Energie, die aus dem öffentlichen Netz bezogen wird."
-          : "Aktuell keine Bewegung im Netz-Pfad.",
+      homeGrid: "Überschuss, der ins öffentliche Netz eingespeist wird.",
+      gridHome: "Energie, die aus dem öffentlichen Netz bezogen wird.",
     },
   };
 }
 
-// ─── Aggregate mode (past day, any week, any month) ──────────────────────
+// ─── Aggregate mode ──────────────────────────────────────────────────────
 
 function buildAggregateDiagram(
   agg: PeriodAggregates,
@@ -166,8 +161,7 @@ function buildAggregateDiagram(
   const intK = (kwh: number) => Math.min(1, kwh / scale);
   const vs = TREND_VS[period];
 
-  // Sign convention matches live: + = bezug from grid, − = einspeisung
-  const netSaldoKwh = agg.importKwh - agg.exportKwh;
+  const netSaldoKwh = agg.importKwh - agg.exportKwh; // + = bezug, − = einspeisung
   const exporting = netSaldoKwh < -0.001;
   const importing = netSaldoKwh > 0.001;
 
@@ -182,10 +176,11 @@ function buildAggregateDiagram(
         highlighted: agg.pvProducedKwh > 0.01,
       },
       battery: {
-        big: agg.socEndPct != null ? `${agg.socEndPct} %` : "—",
+        // primary = energy delivered from battery to home (the user-visible value)
+        big: fmtKwh(agg.batteryDischargedKwh),
         small:
-          agg.batteryChargedKwh + agg.batteryDischargedKwh > 0.01
-            ? `↑ ${agg.batteryChargedKwh.toFixed(2).replace(".", ",")} · ↓ ${agg.batteryDischargedKwh.toFixed(2).replace(".", ",")} kWh`
+          agg.batteryChargedKwh > 0.01
+            ? `${fmtKwh(agg.batteryChargedKwh)} geladen`
             : undefined,
         trend: tr(agg.batteryDischargedKwh, prev?.batteryDischargedKwh),
         highlighted: agg.batteryChargedKwh + agg.batteryDischargedKwh > 0.01,
@@ -197,7 +192,7 @@ function buildAggregateDiagram(
       },
       grid: {
         big: fmtSignedKwh(netSaldoKwh),
-        small: `${fmtKwh(agg.importKwh)} Bezug · ${fmtKwh(agg.exportKwh)} Einsp.`,
+        // Subtitle removed — bezug/einspeisung now visible as the two arrow flows.
         trend: tr(netSaldoKwh, prev != null ? (prev.importKwh - prev.exportKwh) : null),
         highlighted: agg.importKwh + agg.exportKwh > 0.01,
         variant: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
@@ -219,25 +214,24 @@ function buildAggregateDiagram(
         label: agg.batteryToHomeKwh >= 0.01 ? fmtKwh(agg.batteryToHomeKwh) : "",
         trend: tr(agg.batteryToHomeKwh, prev?.batteryToHomeKwh),
       },
+      // Two separate flows for the grid: each visible if its direction occurred.
       homeGrid: {
-        intensity: intK(Math.max(agg.exportKwh, agg.importKwh)),
-        label: agg.exportKwh + agg.importKwh >= 0.01
-          ? fmtKwh(Math.abs(netSaldoKwh))
-          : "",
-        trend: tr(Math.abs(netSaldoKwh), prev != null ? Math.abs(prev.importKwh - prev.exportKwh) : null),
-        direction: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
+        intensity: intK(agg.exportKwh),
+        label: agg.exportKwh >= 0.01 ? fmtKwh(agg.exportKwh) : "",
+        trend: tr(agg.exportKwh, prev?.exportKwh),
+      },
+      gridHome: {
+        intensity: intK(agg.importKwh),
+        label: agg.importKwh >= 0.01 ? fmtKwh(agg.importKwh) : "",
+        trend: tr(agg.importKwh, prev?.importKwh),
       },
     } satisfies Record<string, FlowSpec>,
     tooltips: {
       pvHome: `Direkt verbrauchte PV-Energie: ${fmtKwh(agg.pvToHomeKwh)}.`,
       pvBattery: `In den Speicher geflossene PV-Energie: ${fmtKwh(agg.pvToBatteryKwh)}.`,
       batteryHome: `Vom Speicher in die Wohnung gelieferte Energie: ${fmtKwh(agg.batteryToHomeKwh)}.`,
-      homeGrid:
-        exporting
-          ? `Überschuss ins Netz eingespeist: ${fmtKwh(agg.exportKwh)} (Bezug ${fmtKwh(agg.importKwh)}).`
-          : importing
-            ? `Aus dem Netz bezogen: ${fmtKwh(agg.importKwh)} (Einspeisung ${fmtKwh(agg.exportKwh)}).`
-            : `Keine nennenswerte Netz-Bewegung.`,
+      homeGrid: `Ins öffentliche Netz eingespeist: ${fmtKwh(agg.exportKwh)}.`,
+      gridHome: `Aus dem öffentlichen Netz bezogen: ${fmtKwh(agg.importKwh)}.`,
     },
   };
 }
