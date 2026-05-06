@@ -213,3 +213,65 @@ export function deriveLive(
 }
 
 export const BATTERY_CAPACITY_WH_CONST = BATTERY_CAPACITY_WH;
+
+// ─── Per-day aggregates (for week/month bar chart) ────────────────────────
+
+export type DailyAggregate = {
+  date: string;          // YYYY-MM-DD (local)
+  dateMs: number;        // noon of that day, for x-axis
+  pvProducedKwh: number;
+  consumptionKwh: number;
+  importKwh: number;
+  exportKwh: number;
+  netSaldoKwh: number;   // + = net bezug, − = net einspeisung
+  cyclesEquivalent: number;
+  socMinPct: number | null;
+  socMaxPct: number | null;
+};
+
+/** Slice samples by calendar day within [from, to] and aggregate each. */
+export function aggregateByDay(
+  shelly: ShellyRow[],
+  marstek: MarstekRow[],
+  settings: UserSettings,
+  range: { from: Date; to: Date },
+): DailyAggregate[] {
+  const result: DailyAggregate[] = [];
+  // Walk day-by-day. Use millisecond cursors instead of Date addition to
+  // avoid DST ambiguity.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startOfDay = (d: Date) => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  };
+  let cursor = startOfDay(range.from).getTime();
+  const lastDayStart = startOfDay(range.to).getTime();
+  while (cursor <= lastDayStart) {
+    const dayEnd = cursor + dayMs - 1;
+    const sd = shelly.filter((s) => {
+      const t = new Date(s.ts).getTime();
+      return t >= cursor && t <= dayEnd;
+    });
+    const md = marstek.filter((m) => {
+      const t = new Date(m.ts).getTime();
+      return t >= cursor && t <= dayEnd;
+    });
+    const agg = computePeriodAggregates(sd, md, settings);
+    const dateStr = new Date(cursor).toISOString().slice(0, 10);
+    result.push({
+      date: dateStr,
+      dateMs: cursor + dayMs / 2,
+      pvProducedKwh: agg.pvProducedKwh,
+      consumptionKwh: agg.consumptionKwh,
+      importKwh: agg.importKwh,
+      exportKwh: agg.exportKwh,
+      netSaldoKwh: agg.importKwh - agg.exportKwh,
+      cyclesEquivalent: agg.cyclesEquivalent,
+      socMinPct: agg.socMinPct,
+      socMaxPct: agg.socMaxPct,
+    });
+    cursor += dayMs;
+  }
+  return result;
+}

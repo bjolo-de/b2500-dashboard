@@ -13,8 +13,9 @@ import {
   type LiveState,
   type PeriodAggregates,
 } from "@/lib/aggregates";
+import { aggregateByDay } from "@/lib/aggregates";
 import { classifyHealth } from "@/lib/system-health";
-import { mergeTimeSeries, dailySocBands, bucketTimeSeries } from "@/lib/timeseries";
+import { mergeTimeSeries, dailySocBands, enrichStacked } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
 import {
   AGGREGATE_PERIODS,
@@ -35,7 +36,8 @@ import {
   type Trend,
 } from "@/components/flow-diagram";
 import { BalanceSummary } from "@/components/balance-summary";
-import { MainChart, MainChartLegend } from "@/components/main-chart";
+import { StackedAreaChart, StackedAreaLegend } from "@/components/stacked-area-chart";
+import { DailyBarChart, DailyBarLegend } from "@/components/daily-bar-chart";
 import { SocChartBands } from "@/components/soc-chart";
 import { TariffFooter } from "@/components/tariff-footer";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -58,11 +60,6 @@ const TREND_VS: Record<AggregatePeriod, string> = {
   month: "Vormonat",
 };
 const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
-const BUCKET_MS: Record<AggregatePeriod, number> = {
-  today: 0,
-  week:  60 * 60 * 1000,
-  month: 4 * 60 * 60 * 1000,
-};
 
 // ─── Display formatters ───────────────────────────────────────────────────
 
@@ -292,7 +289,7 @@ export default async function Page({
         .reverse()[0] ?? null;
 
     const diagram = buildLiveDiagram(live, todayAgg);
-    const todayPoints = mergeTimeSeries(todayShelly, todayMarstek);
+    const todayPoints = enrichStacked(mergeTimeSeries(todayShelly, todayMarstek));
 
     return (
       <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -333,9 +330,9 @@ export default async function Page({
             <CardLabel>Verlauf heute</CardLabel>
           </CardHeader>
           <CardBody>
-            <MainChart points={todayPoints} />
+            <StackedAreaChart points={todayPoints} />
             <div className="mt-3">
-              <MainChartLegend />
+              <StackedAreaLegend />
             </div>
           </CardBody>
         </Card>
@@ -383,8 +380,14 @@ export default async function Page({
 
   const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod);
 
-  const allPoints = mergeTimeSeries(shelly, marstek);
-  const points = bucketTimeSeries(allPoints, BUCKET_MS[aggPeriod]);
+  // Day-view: stacked-area of power flows.
+  // Week/Month: daily bar chart of energy totals.
+  const dayPoints = aggPeriod === "today"
+    ? enrichStacked(mergeTimeSeries(shelly, marstek))
+    : null;
+  const dailyBars = aggPeriod !== "today"
+    ? aggregateByDay(shelly, marstek, settings, range)
+    : null;
   const bands = dailySocBands(marstek);
 
   return (
@@ -430,14 +433,25 @@ export default async function Page({
       <Card className="mt-4">
         <CardHeader>
           <CardLabel>
-            {aggPeriod === "today" ? "Verlauf" : aggPeriod === "week" ? "Wochenverlauf (1h-Buckets)" : "Monatsverlauf (4h-Buckets)"}
+            {aggPeriod === "today" ? "Verlauf" : aggPeriod === "week" ? "Tagesbilanz" : "Monatsbilanz"}
           </CardLabel>
         </CardHeader>
         <CardBody>
-          <MainChart points={points} />
-          <div className="mt-3">
-            <MainChartLegend />
-          </div>
+          {dayPoints ? (
+            <>
+              <StackedAreaChart points={dayPoints} />
+              <div className="mt-3">
+                <StackedAreaLegend />
+              </div>
+            </>
+          ) : dailyBars ? (
+            <>
+              <DailyBarChart days={dailyBars} />
+              <div className="mt-3">
+                <DailyBarLegend />
+              </div>
+            </>
+          ) : null}
         </CardBody>
       </Card>
 

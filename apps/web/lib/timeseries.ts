@@ -60,6 +60,33 @@ export function mergeTimeSeries(
   }));
 }
 
+// Enrich each ChartPoint with the five components needed for the Tesla-style
+// stacked-area chart: above-zero shows where home consumption came from,
+// below-zero shows where surplus PV went.
+export type StackedAreaPoint = ChartPoint & {
+  pvDirect: number;          // PV power used directly by home (positive)
+  batteryDischarge: number;  // Battery → home (positive)
+  gridImport: number;        // Grid → home (positive)
+  batteryCharge: number;     // PV → battery (negative for stacking below zero)
+  gridExport: number;        // Home → grid (negative for stacking below zero)
+};
+
+export function enrichStacked(points: ChartPoint[]): StackedAreaPoint[] {
+  return points.map((p) => {
+    const pv = p.pv ?? 0;
+    const output = p.output ?? 0;
+    const saldo = p.saldo ?? 0;
+    return {
+      ...p,
+      pvDirect: Math.min(pv, output),
+      batteryDischarge: Math.max(0, output - pv),
+      gridImport: Math.max(0, saldo),
+      batteryCharge: -Math.max(0, pv - output),
+      gridExport: -Math.max(0, -saldo),
+    };
+  });
+}
+
 // Bucket points into fixed time windows for week/month chart resolution.
 // Average power values, last-value SOC. If bucketSizeMs <= 0 → returns input.
 export function bucketTimeSeries(points: ChartPoint[], bucketSizeMs: number): ChartPoint[] {
