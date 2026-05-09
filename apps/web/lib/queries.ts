@@ -45,28 +45,73 @@ export type UserSettings = {
   ntfy_topic: string | null;
 };
 
-export async function fetchShellyRange(from: Date, to: Date): Promise<ShellyRow[]> {
+// Supabase Cloud free tier hard-caps result sets at 1000 rows per request.
+// A week of 60s Shelly samples is ~10080 rows — 90% would be lost without
+// pagination. We HEAD-count first, then fan out pages in parallel.
+const PAGE_SIZE = 1000;
+
+async function countInRange(
+  table: "shelly_readings" | "marstek_readings",
+  from: Date,
+  to: Date,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from(table)
+    .select("ts", { head: true, count: "exact" })
+    .gte("ts", from.toISOString())
+    .lte("ts", to.toISOString());
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function fetchShellyPage(from: Date, to: Date, start: number, end: number): Promise<ShellyRow[]> {
   const { data, error } = await supabase
     .from("shelly_readings")
     .select("ts, total_w, a_w, b_w, c_w")
     .gte("ts", from.toISOString())
     .lte("ts", to.toISOString())
     .order("ts", { ascending: true })
+    .range(start, end)
     .returns<ShellyRow[]>();
   if (error) throw error;
   return data ?? [];
 }
 
-export async function fetchMarstekRange(from: Date, to: Date): Promise<MarstekRow[]> {
+async function fetchMarstekPage(from: Date, to: Date, start: number, end: number): Promise<MarstekRow[]> {
   const { data, error } = await supabase
     .from("marstek_readings")
     .select("ts, battery_soc_pct, pv_total_w, pv_input1_w, pv_input2_w, output_total_w, daily_pv_charge_wh, daily_battery_charge_wh, daily_battery_discharge_wh, temp_min_c, temp_max_c, charge_alarm, discharge_alarm")
     .gte("ts", from.toISOString())
     .lte("ts", to.toISOString())
     .order("ts", { ascending: true })
+    .range(start, end)
     .returns<MarstekRow[]>();
   if (error) throw error;
   return data ?? [];
+}
+
+export async function fetchShellyRange(from: Date, to: Date): Promise<ShellyRow[]> {
+  const total = await countInRange("shelly_readings", from, to);
+  if (total === 0) return [];
+  const pages = Math.ceil(total / PAGE_SIZE);
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      fetchShellyPage(from, to, i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1),
+    ),
+  );
+  return results.flat();
+}
+
+export async function fetchMarstekRange(from: Date, to: Date): Promise<MarstekRow[]> {
+  const total = await countInRange("marstek_readings", from, to);
+  if (total === 0) return [];
+  const pages = Math.ceil(total / PAGE_SIZE);
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      fetchMarstekPage(from, to, i * PAGE_SIZE, (i + 1) * PAGE_SIZE - 1),
+    ),
+  );
+  return results.flat();
 }
 
 export async function fetchLatestShelly(): Promise<ShellyRow | null> {
