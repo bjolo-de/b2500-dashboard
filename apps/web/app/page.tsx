@@ -1,4 +1,5 @@
 import {
+  fetchDailyAggregates,
   fetchHeartbeats,
   fetchLatestMarstek,
   fetchLatestShelly,
@@ -9,13 +10,21 @@ import {
 import {
   BATTERY_CAPACITY_WH_CONST,
   computePeriodAggregates,
+  dailyAggregatesFromRpc,
   deriveLive,
+  periodAggregatesFromDaily,
+  type DailyAggregate,
   type LiveState,
   type PeriodAggregates,
 } from "@/lib/aggregates";
-import { aggregateByDay } from "@/lib/aggregates";
 import { classifyHealth } from "@/lib/system-health";
-import { mergeTimeSeries, dailySocBands, enrichStacked, bucketTimeSeries } from "@/lib/timeseries";
+import {
+  bucketTimeSeries,
+  enrichStacked,
+  mergeTimeSeries,
+  socBandsFromDaily,
+  type DailySocBand,
+} from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
 import {
   AGGREGATE_PERIODS,
@@ -278,7 +287,7 @@ export default async function Page({
 
   // ─── Live tab ───────────────────────────────────────────────────────────
   if (period === "live") {
-    const todayRange = rangeFor("today", new Date());
+    const todayRange = rangeFor("today", new Date(), settings.timezone);
     const [latestShelly, latestMarstek, todayShelly, todayMarstek] = await Promise.all([
       fetchLatestShelly(),
       fetchLatestMarstek(),
@@ -356,12 +365,12 @@ export default async function Page({
   // ─── Aggregate tabs (today / week / month) ────────────────────────────────
   const aggPeriod = period as AggregatePeriod;
   const anchor = parseAnchor(aggPeriod, asAnchor(params.d));
-  const range: Range = rangeFor(aggPeriod, anchor);
+  const range: Range = rangeFor(aggPeriod, anchor, settings.timezone);
 
   // Previous-period range for trend. For current (in-progress) periods we
   // match elapsed time so the comparison is fair (e.g., today 09:00 vs
   // yesterday 00:00–09:00, not yesterday's full day).
-  const fullPrev = rangeFor(aggPeriod, range.prevAnchor);
+  const fullPrev = rangeFor(aggPeriod, range.prevAnchor, settings.timezone);
   const elapsedMs = range.isCurrent
     ? Math.min(
         Date.now() - range.from.getTime(),
@@ -375,27 +384,39 @@ export default async function Page({
       : fullPrev.to,
   };
 
-  const [shelly, marstek, prevShelly, prevMarstek] = await Promise.all([
-    fetchShellyRange(range.from, range.to),
-    fetchMarstekRange(range.from, range.to),
-    fetchShellyRange(prevRange.from, prevRange.to),
-    fetchMarstekRange(prevRange.from, prevRange.to),
-  ]);
+  // Day view still pulls raw samples — the 5-min stacked-area chart needs
+  // sample resolution. Week/Month go through the daily-aggregates RPC,
+  // which collapses ~10k–43k row reads into a single pre-aggregated call.
+  let periodAgg: PeriodAggregates;
+  let prevAgg: PeriodAggregates;
+  let dayPoints: ReturnType<typeof enrichStacked> | null = null;
+  let dailyBars: DailyAggregate[] | null = null;
+  let bands: DailySocBand[] = [];
 
-  const periodAgg = computePeriodAggregates(shelly, marstek, settings);
-  const prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
+  if (aggPeriod === "today") {
+    const [shelly, marstek, prevShelly, prevMarstek] = await Promise.all([
+      fetchShellyRange(range.from, range.to),
+      fetchMarstekRange(range.from, range.to),
+      fetchShellyRange(prevRange.from, prevRange.to),
+      fetchMarstekRange(prevRange.from, prevRange.to),
+    ]);
+    periodAgg = computePeriodAggregates(shelly, marstek, settings);
+    prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
+    dayPoints = enrichStacked(
+      bucketTimeSeries(mergeTimeSeries(shelly, marstek), DAY_BUCKET_MS),
+    );
+  } else {
+    const [daily, prevDaily] = await Promise.all([
+      fetchDailyAggregates(range.from, range.to, settings.timezone),
+      fetchDailyAggregates(prevRange.from, prevRange.to, settings.timezone),
+    ]);
+    periodAgg = periodAggregatesFromDaily(daily, settings);
+    prevAgg = periodAggregatesFromDaily(prevDaily, settings);
+    dailyBars = dailyAggregatesFromRpc(daily);
+    bands = socBandsFromDaily(daily);
+  }
 
   const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod);
-
-  // Day-view: stacked-area of power flows (5-min bucketed to tame inrush spikes).
-  // Week/Month: daily bar chart of energy totals.
-  const dayPoints = aggPeriod === "today"
-    ? enrichStacked(bucketTimeSeries(mergeTimeSeries(shelly, marstek), DAY_BUCKET_MS))
-    : null;
-  const dailyBars = aggPeriod !== "today"
-    ? aggregateByDay(shelly, marstek, settings, range)
-    : null;
-  const bands = dailySocBands(marstek);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -417,8 +438,8 @@ export default async function Page({
         <DateNavigator
           period={aggPeriod}
           label={range.label}
-          prevAnchorParam={rangeFor(aggPeriod, range.prevAnchor).anchorParam}
-          nextAnchorParam={rangeFor(aggPeriod, range.nextAnchor).anchorParam}
+          prevAnchorParam={rangeFor(aggPeriod, range.prevAnchor, settings.timezone).anchorParam}
+          nextAnchorParam={rangeFor(aggPeriod, range.nextAnchor, settings.timezone).anchorParam}
           hasNext={range.hasNext}
           isCurrent={range.isCurrent}
         />

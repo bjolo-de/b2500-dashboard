@@ -45,6 +45,22 @@ export type UserSettings = {
   ntfy_topic: string | null;
 };
 
+// One row per calendar day from the daily_aggregates RPC. All Wh-style
+// values are pre-divided to kWh server-side; SOC is the smallint percent.
+export type DailyAggregateRow = {
+  day: string; // YYYY-MM-DD in the requested tz
+  pv_kwh: number;
+  output_kwh: number;
+  import_kwh: number;
+  export_kwh: number;
+  pv_to_battery_kwh: number;
+  pv_to_home_kwh: number;
+  battery_to_home_kwh: number;
+  soc_min_pct: number | null;
+  soc_max_pct: number | null;
+  soc_end_pct: number | null;
+};
+
 // Supabase Cloud free tier hard-caps result sets at 1000 rows per request.
 // A week of 60s Shelly samples is ~10080 rows — 90% would be lost without
 // pagination. We HEAD-count first, then fan out pages in parallel.
@@ -145,6 +161,24 @@ export async function fetchHeartbeats(): Promise<Heartbeat[]> {
     .order("component", { ascending: true });
   if (error) throw error;
   return data ?? [];
+}
+
+// Server-side daily rollup. Replaces fetchShellyRange + fetchMarstekRange
+// for week/month views: one HTTP call returns ~7–31 pre-aggregated rows
+// instead of fanning out tens of paginated reads to dump tens of thousands
+// of raw samples.
+export async function fetchDailyAggregates(
+  from: Date,
+  to: Date,
+  tz: string = "UTC",
+): Promise<DailyAggregateRow[]> {
+  const { data, error } = await supabase.rpc("daily_aggregates", {
+    from_ts: from.toISOString(),
+    to_ts: to.toISOString(),
+    tz,
+  });
+  if (error) throw error;
+  return (data ?? []) as DailyAggregateRow[];
 }
 
 export async function fetchUserSettings(): Promise<UserSettings> {

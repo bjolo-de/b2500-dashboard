@@ -5,7 +5,12 @@
 // - output.total: positive = battery+PV → Hoymiles → home
 // - battery_flow_w (derived): pv - output. Positive = charging, negative = discharging.
 
-import type { ShellyRow, MarstekRow, UserSettings } from "./queries";
+import type {
+  DailyAggregateRow,
+  MarstekRow,
+  ShellyRow,
+  UserSettings,
+} from "./queries";
 
 export type PeriodAggregates = {
   pvProducedKwh: number;
@@ -229,49 +234,111 @@ export type DailyAggregate = {
   socMaxPct: number | null;
 };
 
-/** Slice samples by calendar day within [from, to] and aggregate each. */
-export function aggregateByDay(
-  shelly: ShellyRow[],
-  marstek: MarstekRow[],
+// ─── RPC-based aggregation (week/month views) ─────────────────────────────
+// Server-side daily rollup eliminates the per-row download and the dozens
+// of paginated requests it would require. The functions below derive the
+// existing chart/diagram shapes from the RPC rows.
+
+function dayMidnightMs(date: string): number {
+  // The RPC returns YYYY-MM-DD in the requested tz. We anchor each bar at
+  // noon UTC of that calendar date — visually correct for German users
+  // since the offset stays well within the bar's day.
+  return new Date(date + "T12:00:00Z").getTime();
+}
+
+/** Sum daily rollup rows into a full PeriodAggregates totals object. */
+export function periodAggregatesFromDaily(
+  daily: DailyAggregateRow[],
   settings: UserSettings,
-  range: { from: Date; to: Date },
-): DailyAggregate[] {
-  const result: DailyAggregate[] = [];
-  // Walk day-by-day. Use millisecond cursors instead of Date addition to
-  // avoid DST ambiguity.
-  const dayMs = 24 * 60 * 60 * 1000;
-  const startOfDay = (d: Date) => {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
+): PeriodAggregates {
+  const sum = (k: keyof DailyAggregateRow) =>
+    daily.reduce((acc, d) => acc + ((d[k] as number | null) ?? 0), 0);
+
+  const pvProducedKwh = sum("pv_kwh");
+  const outputKwh = sum("output_kwh");
+  const importKwh = sum("import_kwh");
+  const exportKwh = sum("export_kwh");
+  const pvToBatteryKwh = sum("pv_to_battery_kwh");
+  const pvToHomeKwh = sum("pv_to_home_kwh");
+  const batteryToHomeKwh = sum("battery_to_home_kwh");
+
+  // consumptionKwh = outputKwh + (importKwh − exportKwh)
+  const consumptionKwh = outputKwh + importKwh - exportKwh;
+
+  const socMins = daily
+    .map((d) => d.soc_min_pct)
+    .filter((v): v is number => v != null);
+  const socMaxes = daily
+    .map((d) => d.soc_max_pct)
+    .filter((v): v is number => v != null);
+  const socMinPct = socMins.length ? Math.min(...socMins) : null;
+  const socMaxPct = socMaxes.length ? Math.max(...socMaxes) : null;
+  // Most recent day with a non-null SOC sample.
+  const socEndPct =
+    [...daily].reverse().find((d) => d.soc_end_pct != null)?.soc_end_pct ?? null;
+
+  const cyclesEquivalent =
+    (pvToBatteryKwh + batteryToHomeKwh) / (2 * (BATTERY_CAPACITY_WH / 1000));
+
+  const selfConsumptionPct =
+    pvProducedKwh > 0
+      ? clamp(((pvProducedKwh - exportKwh) / pvProducedKwh) * 100, 0, 100)
+      : null;
+  const autarkyPct =
+    consumptionKwh > 0
+      ? clamp(((consumptionKwh - importKwh) / consumptionKwh) * 100, 0, 100)
+      : null;
+
+  const energyCt = Number(settings.energy_price_ct_kwh);
+  const feedInCt = Number(settings.feed_in_ct_kwh);
+  const selfUsedKwh = Math.max(0, pvProducedKwh - exportKwh);
+
+  return {
+    pvProducedKwh,
+    consumptionKwh,
+    outputKwh,
+    importKwh,
+    exportKwh,
+    batteryChargedKwh: pvToBatteryKwh,
+    batteryDischargedKwh: batteryToHomeKwh,
+    pvToBatteryKwh,
+    pvToHomeKwh,
+    batteryToHomeKwh,
+    homeToGridKwh: exportKwh,
+    gridToHomeKwh: importKwh,
+    socMinPct,
+    socMaxPct,
+    socEndPct,
+    cyclesEquivalent,
+    selfConsumptionPct,
+    autarkyPct,
+    costAvoidedEur: selfUsedKwh * (energyCt / 100),
+    feedInRevenueEur: exportKwh * (feedInCt / 100),
+    costImportedEur: importKwh * (energyCt / 100),
+    costWithoutSystemEur: consumptionKwh * (energyCt / 100),
   };
-  let cursor = startOfDay(range.from).getTime();
-  const lastDayStart = startOfDay(range.to).getTime();
-  while (cursor <= lastDayStart) {
-    const dayEnd = cursor + dayMs - 1;
-    const sd = shelly.filter((s) => {
-      const t = new Date(s.ts).getTime();
-      return t >= cursor && t <= dayEnd;
-    });
-    const md = marstek.filter((m) => {
-      const t = new Date(m.ts).getTime();
-      return t >= cursor && t <= dayEnd;
-    });
-    const agg = computePeriodAggregates(sd, md, settings);
-    const dateStr = new Date(cursor).toISOString().slice(0, 10);
-    result.push({
-      date: dateStr,
-      dateMs: cursor + dayMs / 2,
-      pvProducedKwh: agg.pvProducedKwh,
-      consumptionKwh: agg.consumptionKwh,
-      importKwh: agg.importKwh,
-      exportKwh: agg.exportKwh,
-      netSaldoKwh: agg.importKwh - agg.exportKwh,
-      cyclesEquivalent: agg.cyclesEquivalent,
-      socMinPct: agg.socMinPct,
-      socMaxPct: agg.socMaxPct,
-    });
-    cursor += dayMs;
-  }
-  return result;
+}
+
+/** Map RPC rows to the bar-chart's per-day shape. */
+export function dailyAggregatesFromRpc(
+  daily: DailyAggregateRow[],
+): DailyAggregate[] {
+  return daily.map((d) => {
+    const consumptionKwh = d.output_kwh + d.import_kwh - d.export_kwh;
+    const cyclesEquivalent =
+      (d.pv_to_battery_kwh + d.battery_to_home_kwh) /
+      (2 * (BATTERY_CAPACITY_WH / 1000));
+    return {
+      date: d.day,
+      dateMs: dayMidnightMs(d.day),
+      pvProducedKwh: d.pv_kwh,
+      consumptionKwh,
+      importKwh: d.import_kwh,
+      exportKwh: d.export_kwh,
+      netSaldoKwh: d.import_kwh - d.export_kwh,
+      cyclesEquivalent,
+      socMinPct: d.soc_min_pct,
+      socMaxPct: d.soc_max_pct,
+    };
+  });
 }

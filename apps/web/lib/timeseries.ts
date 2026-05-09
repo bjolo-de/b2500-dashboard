@@ -1,7 +1,7 @@
 // Merge shelly and marstek time series into a single array for charting.
 // Strategy: union of timestamps from both sources, forward-fill each metric.
 
-import type { ShellyRow, MarstekRow } from "./queries";
+import type { DailyAggregateRow, MarstekRow, ShellyRow } from "./queries";
 
 export type ChartPoint = {
   ts: string;
@@ -129,22 +129,16 @@ export type DailySocBand = {
   max: number;
 };
 
-export function dailySocBands(marstek: MarstekRow[]): DailySocBand[] {
-  const byDay = new Map<string, { min: number; max: number; ms: number }>();
-  for (const m of marstek) {
-    if (m.battery_soc_pct == null) continue;
-    const d = new Date(m.ts);
-    const key = d.toISOString().slice(0, 10);
-    const ms = new Date(key + "T12:00:00Z").getTime();
-    const cur = byDay.get(key);
-    if (!cur) {
-      byDay.set(key, { min: m.battery_soc_pct, max: m.battery_soc_pct, ms });
-    } else {
-      cur.min = Math.min(cur.min, m.battery_soc_pct);
-      cur.max = Math.max(cur.max, m.battery_soc_pct);
-    }
-  }
-  return Array.from(byDay.entries())
-    .map(([date, v]) => ({ date, dateMs: v.ms, min: v.min, max: v.max }))
-    .sort((a, b) => a.dateMs - b.dateMs);
+export function socBandsFromDaily(daily: DailyAggregateRow[]): DailySocBand[] {
+  return daily
+    .filter(
+      (d): d is DailyAggregateRow & { soc_min_pct: number; soc_max_pct: number } =>
+        d.soc_min_pct != null && d.soc_max_pct != null,
+    )
+    .map((d) => ({
+      date: d.day,
+      dateMs: new Date(d.day + "T12:00:00Z").getTime(),
+      min: d.soc_min_pct,
+      max: d.soc_max_pct,
+    }));
 }

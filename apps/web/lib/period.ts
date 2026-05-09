@@ -9,11 +9,15 @@
 //
 // `isCurrent` distinguishes "current period (live)" from "past period
 // (purely aggregate)" — the diagram switches mode based on this.
+//
+// All boundary math is done in the user's tz via TZDate so day buckets
+// align to local midnight regardless of where the server runs (Vercel = UTC).
 
+import { TZDate } from "@date-fns/tz";
 import {
   addDays, addMonths, addWeeks,
   endOfDay, endOfMonth, endOfWeek,
-  format, getISOWeek, getISOWeekYear, parse, parseISO,
+  format, getISOWeek, getISOWeekYear, parseISO,
   startOfDay, startOfMonth, startOfWeek,
 } from "date-fns";
 import { de } from "date-fns/locale";
@@ -65,20 +69,20 @@ export function parseAnchor(period: AggregatePeriod, dParam: string | undefined)
   return new Date();
 }
 
-export function rangeFor(period: AggregatePeriod, anchor: Date): Range {
-  const now = new Date();
+export function rangeFor(period: AggregatePeriod, anchor: Date, tz: string): Range {
+  const tzAnchor = new TZDate(anchor.getTime(), tz);
+  const now = new TZDate(Date.now(), tz);
   switch (period) {
     case "today": {
-      const from = startOfDay(anchor);
-      const to = endOfDay(anchor);
-      const isCurrent =
-        from.getTime() === startOfDay(now).getTime();
-      const anchorParam = format(anchor, "yyyy-MM-dd");
+      const from = startOfDay(tzAnchor);
+      const to = endOfDay(tzAnchor);
+      const isCurrent = from.getTime() === startOfDay(now).getTime();
+      const anchorParam = format(tzAnchor, "yyyy-MM-dd");
       return {
         from,
         to,
-        label: format(anchor, "EEEE, d. MMMM yyyy", { locale: de }),
-        shortLabel: format(anchor, "d. MMM yyyy", { locale: de }),
+        label: format(tzAnchor, "EEEE, d. MMMM yyyy", { locale: de }),
+        shortLabel: format(tzAnchor, "d. MMM yyyy", { locale: de }),
         isCurrent,
         anchorParam,
         prevAnchor: addDays(from, -1),
@@ -87,12 +91,12 @@ export function rangeFor(period: AggregatePeriod, anchor: Date): Range {
       };
     }
     case "week": {
-      const from = startOfWeek(anchor, WEEK_OPTS);
-      const to = endOfWeek(anchor, WEEK_OPTS);
+      const from = startOfWeek(tzAnchor, WEEK_OPTS);
+      const to = endOfWeek(tzAnchor, WEEK_OPTS);
       const isCurrent =
         from.getTime() === startOfWeek(now, WEEK_OPTS).getTime();
-      const wk = getISOWeek(anchor);
-      const wkYear = getISOWeekYear(anchor);
+      const wk = getISOWeek(tzAnchor);
+      const wkYear = getISOWeekYear(tzAnchor);
       const anchorParam = `${wkYear}-W${String(wk).padStart(2, "0")}`;
       const sat = addDays(from, 6);
       return {
@@ -108,16 +112,16 @@ export function rangeFor(period: AggregatePeriod, anchor: Date): Range {
       };
     }
     case "month": {
-      const from = startOfMonth(anchor);
-      const to = endOfMonth(anchor);
+      const from = startOfMonth(tzAnchor);
+      const to = endOfMonth(tzAnchor);
       const isCurrent =
         from.getTime() === startOfMonth(now).getTime();
-      const anchorParam = format(anchor, "yyyy-MM");
+      const anchorParam = format(tzAnchor, "yyyy-MM");
       return {
         from,
         to,
-        label: format(anchor, "MMMM yyyy", { locale: de }),
-        shortLabel: format(anchor, "MMMM yyyy", { locale: de }),
+        label: format(tzAnchor, "MMMM yyyy", { locale: de }),
+        shortLabel: format(tzAnchor, "MMMM yyyy", { locale: de }),
         isCurrent,
         anchorParam,
         prevAnchor: addMonths(from, -1),
@@ -128,6 +132,6 @@ export function rangeFor(period: AggregatePeriod, anchor: Date): Range {
   }
 }
 
-export function formatAnchorParam(period: AggregatePeriod, anchor: Date): string {
-  return rangeFor(period, anchor).anchorParam;
+export function formatAnchorParam(period: AggregatePeriod, anchor: Date, tz: string): string {
+  return rangeFor(period, anchor, tz).anchorParam;
 }
