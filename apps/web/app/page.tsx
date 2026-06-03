@@ -94,6 +94,9 @@ function fmtSignedKwh(kwh: number, digits = 2): string {
   const sign = kwh > 0 ? "+" : kwh < 0 ? "−" : "";
   return `${sign}${Math.abs(kwh).toFixed(digits).replace(".", ",")} kWh`;
 }
+function fmtEur(eur: number): string {
+  return `${eur.toFixed(2).replace(".", ",")} €`;
+}
 function fmtCycles(c: number): string {
   if (c < 10) return c.toFixed(2).replace(".", ",");
   if (c < 100) return c.toFixed(1).replace(".", ",");
@@ -177,6 +180,7 @@ function buildAggregateDiagram(
   agg: PeriodAggregates,
   prev: PeriodAggregates | null,
   period: AggregatePeriod,
+  settings: { energy_price_ct_kwh: number },
 ) {
   const scale = SCALE_KWH[period];
   const intK = (kwh: number) => Math.min(1, kwh / scale);
@@ -226,10 +230,21 @@ function buildAggregateDiagram(
         highlighted: agg.consumptionKwh > 0.01,
       },
       grid: {
-        big: fmtSignedKwh(netSaldoKwh),
-        trend: tr(netSaldoKwh, prev != null ? (prev.importKwh - prev.exportKwh) : null),
-        highlighted: agg.importKwh + agg.exportKwh > 0.01,
-        variant: (exporting ? "export" : importing ? "import" : "idle") as "export" | "import" | "idle",
+        // The user has no feed-in tariff — Bezug is the real cost driver,
+        // Einspeisung is "ungenutzte PV". Show Bezug as the primary metric,
+        // cost + ungenutzt as the secondary line.
+        big: fmtKwh(agg.importKwh),
+        small: (() => {
+          const cost = agg.importKwh * (Number(settings.energy_price_ct_kwh) / 100);
+          if (agg.exportKwh > 0.01) {
+            return `${fmtEur(cost)} · ${fmtKwh(agg.exportKwh)} ungenutzt`;
+          }
+          return fmtEur(cost);
+        })(),
+        trend: tr(agg.importKwh, prev?.importKwh),
+        highlighted: agg.importKwh > 0.01,
+        dim: agg.importKwh < 0.005,
+        variant: agg.importKwh > 0.01 ? "import" : "idle",
       },
     } satisfies Record<string, ModuleSpec>,
     flows: {
@@ -416,7 +431,7 @@ export default async function Page({
     bands = socBandsFromDaily(daily);
   }
 
-  const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod);
+  const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod, settings);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
