@@ -167,10 +167,18 @@ export async function fetchHeartbeats(): Promise<Heartbeat[]> {
 // for week/month views: one HTTP call returns ~7–31 pre-aggregated rows
 // instead of fanning out tens of paginated reads to dump tens of thousands
 // of raw samples.
-export async function fetchDailyAggregates(
+//
+// Supabase Free Tier enforces an 8 s Postgres statement_timeout. The
+// daily-aggregate RPC scans ~2880 rows per day with window functions, so
+// a 31-day call hits the timeout. We chunk into 10-day windows and fan
+// them out in parallel — each chunk completes in ~1.5 s on the free CPU.
+const RPC_MAX_DAYS = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+async function rpcDailyAggregates(
   from: Date,
   to: Date,
-  tz: string = "UTC",
+  tz: string,
 ): Promise<DailyAggregateRow[]> {
   const { data, error } = await supabase.rpc("daily_aggregates", {
     from_ts: from.toISOString(),
@@ -179,6 +187,35 @@ export async function fetchDailyAggregates(
   });
   if (error) throw error;
   return (data ?? []) as DailyAggregateRow[];
+}
+
+export async function fetchDailyAggregates(
+  from: Date,
+  to: Date,
+  tz: string = "UTC",
+): Promise<DailyAggregateRow[]> {
+  const totalMs = to.getTime() - from.getTime();
+  if (totalMs <= RPC_MAX_DAYS * DAY_MS) {
+    return rpcDailyAggregates(from, to, tz);
+  }
+  // Chunk into ≤ RPC_MAX_DAYS-day windows so each call stays under
+  // statement_timeout. Boundaries inclusive on `from`, exclusive on `to`
+  // per chunk; the RPC dedupes via "day" GROUP BY so any rounding overlap
+  // is harmless (later chunk wins).
+  const chunks: { from: Date; to: Date }[] = [];
+  let cursor = from.getTime();
+  while (cursor < to.getTime()) {
+    const chunkEnd = Math.min(cursor + RPC_MAX_DAYS * DAY_MS, to.getTime());
+    chunks.push({ from: new Date(cursor), to: new Date(chunkEnd) });
+    cursor = chunkEnd;
+  }
+  const results = await Promise.all(
+    chunks.map((c) => rpcDailyAggregates(c.from, c.to, tz)),
+  );
+  // Flatten + dedupe by day (later chunks override on overlap).
+  const byDay = new Map<string, DailyAggregateRow>();
+  for (const rows of results) for (const r of rows) byDay.set(r.day, r);
+  return Array.from(byDay.values()).sort((a, b) => a.day.localeCompare(b.day));
 }
 
 export async function fetchUserSettings(): Promise<UserSettings> {
