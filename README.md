@@ -35,7 +35,8 @@ B2500 ──MQTT (plain :1883)──→ Oracle Cloud Always-Free VM
                               └─ Forwarder    → Supabase
                               ↑
                               cron */5 min curls /api/health-check on Vercel
-                              └→ ntfy.sh push on outage
+                              │  └→ ntfy.sh push on outage
+                              └ cron daily curls /api/rollup → daily_rollups cache
 Shelly 3EM Gen3 ──Shelly script──→ Supabase
 Pico Bridge ──heartbeat──────────→ Supabase
 

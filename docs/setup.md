@@ -266,14 +266,23 @@ Move the Pico back to the router USB port.
 
 ## Sprint 5 — Health-Check Cron (~5 min)
 
-The dashboard exposes `/api/health-check` which checks heartbeat freshness
-and sends ntfy push on state transitions. We trigger it every 5 min from
-the Oracle VM (Vercel Hobby plan caps cron at daily; Oracle's free).
+The dashboard exposes two cron endpoints, both triggered from the Oracle VM
+(Vercel Hobby plan caps cron at daily; Oracle's is free and reliable):
+
+- `/api/health-check` — checks heartbeat freshness, ntfy push on outage. Every 5 min.
+- `/api/rollup` — finalizes the previous day into the `daily_rollups` cache so the
+  week/month views never pay a cold recompute. Once a day, after local midnight.
+
+`crontab -` **replaces** the whole crontab, so set both lines in one shot.
+02:15 UTC is safely after Berlin midnight year-round (no DST math needed).
 
 On the Oracle VM via SSH:
 
 ```sh
-(echo "*/5 * * * * curl -fsS -m 20 https://<your-vercel-url>/api/health-check >/dev/null 2>&1") | crontab -
+crontab - <<'CRON'
+*/5 * * * * curl -fsS -m 20 https://<your-vercel-url>/api/health-check >/dev/null 2>&1
+15  2 * * * curl -fsS -m 60 https://<your-vercel-url>/api/rollup       >/dev/null 2>&1
+CRON
 crontab -l    # verify
 ```
 
