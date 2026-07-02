@@ -3,6 +3,7 @@ import {
   fetchHeartbeats,
   fetchLatestMarstek,
   fetchLatestShelly,
+  fetchLifetimeBatteryThroughput,
   fetchMarstekRange,
   fetchShellyRange,
   fetchUserSettings,
@@ -73,9 +74,6 @@ const TREND_VS: Record<AggregatePeriod, string> = {
   month: "Vormonat",
 };
 const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
-
-// Rollups exist from here on — the RPC range for the lifetime cycle count.
-const DATA_EPOCH = new Date("2025-01-01T00:00:00Z");
 
 // Battery health line shared by the flow-diagram tooltips and the SOC card.
 function cycleHealth(totalCycles: number): { pctLabel: string; sentence: string } {
@@ -341,7 +339,7 @@ export default async function Page({
         fetchLatestMarstek(),
         fetchShellyRange(todayRange.from, todayRange.to),
         fetchMarstekRange(todayRange.from, todayRange.to),
-        fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
+        fetchLifetimeBatteryThroughput(settings.timezone),
       ]);
     const live = deriveLive(latestShelly, latestMarstek, latestMarstek?.raw ?? null);
     const todayAgg = computePeriodAggregates(todayShelly, todayMarstek, settings);
@@ -448,7 +446,7 @@ export default async function Page({
       fetchMarstekRange(range.from, range.to),
       fetchShellyRange(prevRange.from, prevRange.to),
       fetchMarstekRange(prevRange.from, prevRange.to),
-      fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
+      fetchLifetimeBatteryThroughput(settings.timezone),
     ]);
     periodAgg = computePeriodAggregates(shelly, marstek, settings);
     prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
@@ -458,7 +456,7 @@ export default async function Page({
     const [daily, prevDaily, lifetimeDaily] = await Promise.all([
       fetchDailyAggregates(range.from, range.to, settings.timezone),
       fetchDailyAggregates(prevRange.from, prevRange.to, settings.timezone),
-      fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
+      fetchLifetimeBatteryThroughput(settings.timezone),
     ]);
     periodAgg = periodAggregatesFromDaily(daily, settings);
     prevAgg = periodAggregatesFromDaily(prevDaily, settings);

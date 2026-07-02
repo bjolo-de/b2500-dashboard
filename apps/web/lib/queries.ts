@@ -186,6 +186,36 @@ export async function fetchDailyAggregates(
   return (data ?? []) as DailyAggregateRow[];
 }
 
+// Lifetime battery throughput for the cycle-health readout. Reads the
+// daily_rollups table DIRECTLY (anon has a read policy) — never through
+// daily_aggregates_cached: an open-ended range makes that RPC treat every
+// pre-logging day as "missing" and re-aggregate the entire raw history on
+// each call, which is exactly the full-table scan the cache exists to avoid.
+// Days-with-data only, so the row count stays tiny (~1 row/day); paginate
+// anyway to stay correct past the 1000-row response cap (~3 years in).
+export type BatteryThroughputRow = {
+  pv_to_battery_kwh: number;
+  battery_to_home_kwh: number;
+};
+
+export async function fetchLifetimeBatteryThroughput(
+  tz: string,
+): Promise<BatteryThroughputRow[]> {
+  const rows: BatteryThroughputRow[] = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabase
+      .from("daily_rollups")
+      .select("pv_to_battery_kwh, battery_to_home_kwh")
+      .eq("tz", tz)
+      .order("day", { ascending: true })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+      .returns<BatteryThroughputRow[]>();
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) return rows;
+  }
+}
+
 export async function fetchUserSettings(): Promise<UserSettings> {
   const { data, error } = await supabase
     .from("user_settings")

@@ -228,7 +228,9 @@ export const BATTERY_CAPACITY_WH_CONST = BATTERY_CAPACITY_WH;
 export const BATTERY_CYCLE_LIFE = 6000;
 
 /** Equivalent full cycles accumulated over all rollup days (since logging began). */
-export function lifetimeCyclesFromDaily(daily: DailyAggregateRow[]): number {
+export function lifetimeCyclesFromDaily(
+  daily: Array<Pick<DailyAggregateRow, "pv_to_battery_kwh" | "battery_to_home_kwh">>,
+): number {
   const throughputKwh = daily.reduce(
     (acc, d) => acc + d.pv_to_battery_kwh + d.battery_to_home_kwh,
     0,
