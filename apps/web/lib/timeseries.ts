@@ -71,18 +71,24 @@ export type StackedAreaPoint = ChartPoint & {
   gridExport: number;        // Home → grid (negative for stacking below zero)
 };
 
+// Exported power leaves via the below-zero band, so it must not also sit in
+// the consumption stack: only the output share that stays in the home counts
+// as pvDirect/batteryDischarge. That way the positive stack sums exactly to
+// consumption (output − export + import) instead of overstating it.
 export function enrichStacked(points: ChartPoint[]): StackedAreaPoint[] {
   return points.map((p) => {
     const pv = p.pv ?? 0;
     const output = p.output ?? 0;
     const saldo = p.saldo ?? 0;
+    const exported = Math.max(0, -saldo);
+    const consumedOutput = Math.max(0, output - exported);
     return {
       ...p,
-      pvDirect: Math.min(pv, output),
-      batteryDischarge: Math.max(0, output - pv),
+      pvDirect: Math.min(pv, consumedOutput),
+      batteryDischarge: Math.max(0, consumedOutput - pv),
       gridImport: Math.max(0, saldo),
       batteryCharge: -Math.max(0, pv - output),
-      gridExport: -Math.max(0, -saldo),
+      gridExport: -exported,
     };
   });
 }
@@ -109,9 +115,13 @@ const HOUR_MS = 60 * 60 * 1000;
 // Trapezoidal integration per flow, binned by interval midpoint — the same
 // scheme as computePeriodAggregates, so hour sums line up with day totals.
 export function hourlyEnergyFromPoints(points: ChartPoint[]): HourlyEnergyPoint[] {
+  // Output share consumed at home (export leaves via the below-zero band —
+  // same decomposition as enrichStacked, so the stack sums to consumption).
+  const consumedOutput = (p: ChartPoint) =>
+    Math.max(0, (p.output ?? 0) - Math.max(0, -(p.saldo ?? 0)));
   const flows = {
-    pvDirect: (p: ChartPoint) => Math.min(p.pv ?? 0, p.output ?? 0),
-    batteryDischarge: (p: ChartPoint) => Math.max(0, (p.output ?? 0) - (p.pv ?? 0)),
+    pvDirect: (p: ChartPoint) => Math.min(p.pv ?? 0, consumedOutput(p)),
+    batteryDischarge: (p: ChartPoint) => Math.max(0, consumedOutput(p) - (p.pv ?? 0)),
     gridImport: (p: ChartPoint) => Math.max(0, p.saldo ?? 0),
     batteryCharge: (p: ChartPoint) => Math.max(0, (p.pv ?? 0) - (p.output ?? 0)),
     gridExport: (p: ChartPoint) => Math.max(0, -(p.saldo ?? 0)),

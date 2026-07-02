@@ -74,6 +74,11 @@ export function BalanceSummary({ agg, label }: Props) {
             value={formatKwh(agg.importKwh)}
             sub={agg.costImportedEur > 0 ? formatEur(agg.costImportedEur) : undefined}
             color="text-alert"
+            info={{
+              title: "Netz-Bezug (brutto)",
+              description:
+                "Tatsächlich aus dem Netz bezogene Energie — das zählt dein Zähler, das bezahlst du (zzgl. Grundgebühr). Einspeisung wird nicht gegengerechnet.",
+            }}
           />
           <Metric
             label="Einspeisung"

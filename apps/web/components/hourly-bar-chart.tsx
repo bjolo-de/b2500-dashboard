@@ -89,6 +89,8 @@ export function HourlyBarChart({
   }
   const toMs = fromMs + 24 * 3_600_000;
   const ticks = Array.from({ length: 7 }, (_, i) => fromMs + i * 4 * 3_600_000);
+  // The right edge is next midnight — label it 24:00, not a confusing 00:00.
+  const tickLabel = (ts: number) => (ts === toMs ? "24:00" : hourLabel(ts));
   const barProps = { maxBarSize: 22, isAnimationActive: false, stroke: "#fff", strokeWidth: 0.5 } as const;
 
   return (
@@ -100,7 +102,7 @@ export function HourlyBarChart({
           type="number"
           domain={[fromMs, toMs]}
           ticks={ticks}
-          tickFormatter={hourLabel}
+          tickFormatter={tickLabel}
           stroke="#a1a1aa"
           tickLine={false}
           tick={{ fontSize: 11 }}

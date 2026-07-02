@@ -119,7 +119,11 @@ export function computePeriodAggregates(
 
   const energyCt = Number(settings.energy_price_ct_kwh);
   const feedInCt = Number(settings.feed_in_ct_kwh);
-  const selfUsedKwh = Math.max(0, pvWh - exportWh) / 1000;
+  // Avoided cost = the actual bill difference vs. no system:
+  // (consumption − import) × price. Deliberately NOT (PV − export) × price,
+  // which would count battery round-trip losses as savings and contradict
+  // the Hochrechnung line (costWithoutSystem − costImported).
+  const selfCoveredKwh = Math.max(0, consumptionWh - importWh) / 1000;
 
   // SOC range
   const socs = marstek.map((r) => r.battery_soc_pct).filter((v): v is number => v != null);
@@ -150,7 +154,7 @@ export function computePeriodAggregates(
     cyclesEquivalent,
     selfConsumptionPct,
     autarkyPct,
-    costAvoidedEur: selfUsedKwh * (energyCt / 100),
+    costAvoidedEur: selfCoveredKwh * (energyCt / 100),
     feedInRevenueEur: (exportWh / 1000) * (feedInCt / 100),
     costImportedEur: (importWh / 1000) * (energyCt / 100),
     costWithoutSystemEur: (consumptionWh / 1000) * (energyCt / 100),
@@ -295,7 +299,8 @@ export function periodAggregatesFromDaily(
 
   const energyCt = Number(settings.energy_price_ct_kwh);
   const feedInCt = Number(settings.feed_in_ct_kwh);
-  const selfUsedKwh = Math.max(0, pvProducedKwh - exportKwh);
+  // Same avoided-cost definition as computePeriodAggregates: bill difference.
+  const selfCoveredKwh = Math.max(0, consumptionKwh - importKwh);
 
   return {
     pvProducedKwh,
@@ -316,7 +321,7 @@ export function periodAggregatesFromDaily(
     cyclesEquivalent,
     selfConsumptionPct,
     autarkyPct,
-    costAvoidedEur: selfUsedKwh * (energyCt / 100),
+    costAvoidedEur: selfCoveredKwh * (energyCt / 100),
     feedInRevenueEur: exportKwh * (feedInCt / 100),
     costImportedEur: importKwh * (energyCt / 100),
     costWithoutSystemEur: consumptionKwh * (energyCt / 100),
@@ -332,6 +337,15 @@ export function dailyAggregatesFromRpc(
     const cyclesEquivalent =
       (d.pv_to_battery_kwh + d.battery_to_home_kwh) /
       (2 * (BATTERY_CAPACITY_WH / 1000));
+    // Chart decomposition: exported energy is drawn below zero, so it is
+    // taken out of the home-directed shares (PV first — export is midday PV
+    // surplus — remainder from battery). The stack then sums to consumption.
+    const exportFromPv = Math.min(d.export_kwh, d.pv_to_home_kwh);
+    const pvToHomeKwh = d.pv_to_home_kwh - exportFromPv;
+    const batteryToHomeKwh = Math.max(
+      0,
+      d.battery_to_home_kwh - (d.export_kwh - exportFromPv),
+    );
     return {
       date: d.day,
       dateMs: dayMidnightMs(d.day),
@@ -340,8 +354,8 @@ export function dailyAggregatesFromRpc(
       importKwh: d.import_kwh,
       exportKwh: d.export_kwh,
       netSaldoKwh: d.import_kwh - d.export_kwh,
-      pvToHomeKwh: d.pv_to_home_kwh,
-      batteryToHomeKwh: d.battery_to_home_kwh,
+      pvToHomeKwh,
+      batteryToHomeKwh,
       pvToBatteryKwh: d.pv_to_battery_kwh,
       cyclesEquivalent,
       socMinPct: d.soc_min_pct,

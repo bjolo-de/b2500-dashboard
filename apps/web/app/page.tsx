@@ -263,6 +263,11 @@ function buildAggregateDiagram(
         highlighted: agg.importKwh > 0.01,
         dim: agg.importKwh < 0.005,
         variant: agg.importKwh > 0.01 ? "import" : "idle",
+        info: {
+          title: "Netz-Bezug (brutto)",
+          description:
+            "Tatsächlich aus dem Netz bezogene Energie — das zählt dein Zähler, das bezahlst du (zzgl. Grundgebühr). Einspeisung wird nicht gegengerechnet, da es keine Vergütung gibt.",
+        },
       },
     } satisfies Record<string, ModuleSpec>,
     flows: {

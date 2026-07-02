@@ -128,7 +128,9 @@ export function StackedAreaChart({
           domain={hasDomain ? [fromMs, toMs] : ["dataMin", "dataMax"]}
           ticks={hourTicks}
           allowDataOverflow
-          tickFormatter={(v: number) => formatTime(new Date(v).toISOString())}
+          tickFormatter={(v: number) =>
+            hasDomain && v === toMs ? "24:00" : formatTime(new Date(v).toISOString())
+          }
           stroke="#a1a1aa"
           tickLine={false}
           tick={{ fontSize: 11 }}
