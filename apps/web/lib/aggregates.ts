@@ -223,6 +223,19 @@ export function deriveLive(
 
 export const BATTERY_CAPACITY_WH_CONST = BATTERY_CAPACITY_WH;
 
+// Marstek specs the B2500's LiFePO4 cells at 6000+ full cycles until 80 %
+// residual capacity — the reference for the battery-health readout.
+export const BATTERY_CYCLE_LIFE = 6000;
+
+/** Equivalent full cycles accumulated over all rollup days (since logging began). */
+export function lifetimeCyclesFromDaily(daily: DailyAggregateRow[]): number {
+  const throughputKwh = daily.reduce(
+    (acc, d) => acc + d.pv_to_battery_kwh + d.battery_to_home_kwh,
+    0,
+  );
+  return throughputKwh / (2 * (BATTERY_CAPACITY_WH / 1000));
+}
+
 // ─── Per-day aggregates (for week/month bar chart) ────────────────────────
 
 export type DailyAggregate = {

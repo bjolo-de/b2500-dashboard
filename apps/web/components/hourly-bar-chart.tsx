@@ -95,13 +95,18 @@ export function HourlyBarChart({
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={hours} stackOffset="sign" margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      {/* right margin fits the half of the edge "24:00" label that hangs
+          past the plot — 8px would crop it to "24:0" */}
+      <BarChart data={hours} stackOffset="sign" margin={{ top: 8, right: 20, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="#e4e4e7" vertical={false} />
         <XAxis
           dataKey="hourMs"
           type="number"
           domain={[fromMs, toMs]}
           ticks={ticks}
+          // interval 0 renders every provided tick — Recharts' default
+          // collision heuristic otherwise silently drops e.g. 20:00.
+          interval={0}
           tickFormatter={tickLabel}
           stroke="#a1a1aa"
           tickLine={false}

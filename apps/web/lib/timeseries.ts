@@ -60,39 +60,6 @@ export function mergeTimeSeries(
   }));
 }
 
-// Enrich each ChartPoint with the five components needed for the Tesla-style
-// stacked-area chart: above-zero shows where home consumption came from,
-// below-zero shows where surplus PV went.
-export type StackedAreaPoint = ChartPoint & {
-  pvDirect: number;          // PV power used directly by home (positive)
-  batteryDischarge: number;  // Battery → home (positive)
-  gridImport: number;        // Grid → home (positive)
-  batteryCharge: number;     // PV → battery (negative for stacking below zero)
-  gridExport: number;        // Home → grid (negative for stacking below zero)
-};
-
-// Exported power leaves via the below-zero band, so it must not also sit in
-// the consumption stack: only the output share that stays in the home counts
-// as pvDirect/batteryDischarge. That way the positive stack sums exactly to
-// consumption (output − export + import) instead of overstating it.
-export function enrichStacked(points: ChartPoint[]): StackedAreaPoint[] {
-  return points.map((p) => {
-    const pv = p.pv ?? 0;
-    const output = p.output ?? 0;
-    const saldo = p.saldo ?? 0;
-    const exported = Math.max(0, -saldo);
-    const consumedOutput = Math.max(0, output - exported);
-    return {
-      ...p,
-      pvDirect: Math.min(pv, consumedOutput),
-      batteryDischarge: Math.max(0, consumedOutput - pv),
-      gridImport: Math.max(0, saldo),
-      batteryCharge: -Math.max(0, pv - output),
-      gridExport: -exported,
-    };
-  });
-}
-
 // ─── Hourly energy (day view) ─────────────────────────────────────────────
 // The day view shows energy per hour instead of a power curve: integrating
 // over an hour flattens short inrush spikes (2 kW kettle × 3 min = 0,1 kWh)
@@ -154,41 +121,6 @@ export function hourlyEnergyFromPoints(points: ChartPoint[]): HourlyEnergyPoint[
       batteryChargeKwh: -h.batteryCharge,
       gridExportKwh: -h.gridExport,
       consumptionKwh: h.pvDirect + h.batteryDischarge + h.gridImport,
-    }));
-}
-
-// Bucket points into fixed time windows for week/month chart resolution.
-// Average power values, last-value SOC. If bucketSizeMs <= 0 → returns input.
-export function bucketTimeSeries(points: ChartPoint[], bucketSizeMs: number): ChartPoint[] {
-  if (bucketSizeMs <= 0 || points.length < 2) return points;
-  const buckets = new Map<number, {
-    tsMs: number;
-    pvSum: number; pvN: number;
-    saldoSum: number; saldoN: number;
-    outputSum: number; outputN: number;
-    socLast: number | null;
-  }>();
-  for (const p of points) {
-    const k = Math.floor(p.tsMs / bucketSizeMs) * bucketSizeMs;
-    let b = buckets.get(k);
-    if (!b) {
-      b = { tsMs: k, pvSum: 0, pvN: 0, saldoSum: 0, saldoN: 0, outputSum: 0, outputN: 0, socLast: null };
-      buckets.set(k, b);
-    }
-    if (p.pv != null) { b.pvSum += p.pv; b.pvN += 1; }
-    if (p.saldo != null) { b.saldoSum += p.saldo; b.saldoN += 1; }
-    if (p.output != null) { b.outputSum += p.output; b.outputN += 1; }
-    if (p.soc != null) b.socLast = p.soc;
-  }
-  return Array.from(buckets.values())
-    .sort((a, b) => a.tsMs - b.tsMs)
-    .map((b) => ({
-      ts: new Date(b.tsMs).toISOString(),
-      tsMs: b.tsMs,
-      pv: b.pvN > 0 ? b.pvSum / b.pvN : null,
-      saldo: b.saldoN > 0 ? b.saldoSum / b.saldoN : null,
-      output: b.outputN > 0 ? b.outputSum / b.outputN : null,
-      soc: b.socLast,
     }));
 }
 

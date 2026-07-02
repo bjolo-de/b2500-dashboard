@@ -9,9 +9,11 @@ import {
 } from "@/lib/queries";
 import {
   BATTERY_CAPACITY_WH_CONST,
+  BATTERY_CYCLE_LIFE,
   computePeriodAggregates,
   dailyAggregatesFromRpc,
   deriveLive,
+  lifetimeCyclesFromDaily,
   periodAggregatesFromDaily,
   type DailyAggregate,
   type LiveState,
@@ -19,8 +21,6 @@ import {
 } from "@/lib/aggregates";
 import { classifyHealth } from "@/lib/system-health";
 import {
-  bucketTimeSeries,
-  enrichStacked,
   hourlyEnergyFromPoints,
   mergeTimeSeries,
   socBandsFromDaily,
@@ -48,7 +48,6 @@ import {
   type Trend,
 } from "@/components/flow-diagram";
 import { BalanceSummary } from "@/components/balance-summary";
-import { StackedAreaChart, StackedAreaLegend } from "@/components/stacked-area-chart";
 import { DailyBarChart, DailyBarLegend } from "@/components/daily-bar-chart";
 import { HourlyBarChart } from "@/components/hourly-bar-chart";
 import { FlowLegend } from "@/components/chart-shared";
@@ -75,12 +74,18 @@ const TREND_VS: Record<AggregatePeriod, string> = {
 };
 const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
 
-// Bucket size for the day-view stacked-area chart. 5 min averages out
-// transient inrush spikes (kettle, coffee machine inductive bursts often
-// briefly read 10–20 kW for ~1 s) without losing meaningful sustained loads.
-const DAY_BUCKET_MS = 5 * 60 * 1000;
+// Rollups exist from here on — the RPC range for the lifetime cycle count.
+const DATA_EPOCH = new Date("2025-01-01T00:00:00Z");
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+// Battery health line shared by the flow-diagram tooltips and the SOC card.
+function cycleHealth(totalCycles: number): { pctLabel: string; sentence: string } {
+  const pct = (totalCycles / BATTERY_CYCLE_LIFE) * 100;
+  const pctLabel = pct < 1 ? "<1" : String(Math.round(pct));
+  return {
+    pctLabel,
+    sentence: `Gesamt seit Aufzeichnungsbeginn: ${fmtCycles(totalCycles)} Voll-Zyklen — ${pctLabel} % der ~6.000 Ladezyklen, die Marstek für die LiFePO4-Zellen bis 80 % Restkapazität angibt.`,
+  };
+}
 
 // One noon-anchored tick per calendar day of the period (same anchor as
 // dailyAggregatesFromRpc), so week/month charts always span the full
@@ -128,7 +133,7 @@ function trendOf(cur: number, prev: number, vs: string): Trend {
 
 // ─── Live mode ────────────────────────────────────────────────────────────
 
-function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
+function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates, totalCycles: number) {
   const wScale = 800;
   const intW = (w: number) => Math.min(1, w / wScale);
   const exportingW = Math.max(0, -(live.saldoW ?? 0));
@@ -148,6 +153,10 @@ function buildLiveDiagram(live: LiveState, todayAgg: PeriodAggregates) {
             ? `${(live.storedWh / 1000).toFixed(2).replace(".", ",")} / ${(BATTERY_CAPACITY_WH_CONST / 1000).toFixed(2).replace(".", ",")} kWh`
             : undefined,
         highlighted: Math.abs(live.batteryFlowW ?? 0) > 1,
+        info: {
+          title: "Speicher-Gesundheit",
+          description: cycleHealth(totalCycles).sentence,
+        },
       },
       home: {
         big: fmtW(live.consumptionW),
@@ -199,6 +208,7 @@ function buildAggregateDiagram(
   prev: PeriodAggregates | null,
   period: AggregatePeriod,
   settings: { energy_price_ct_kwh: number },
+  totalCycles: number,
 ) {
   const scale = SCALE_KWH[period];
   const intK = (kwh: number) => Math.min(1, kwh / scale);
@@ -238,8 +248,7 @@ function buildAggregateDiagram(
         info: {
           title: "Speicher-Zyklen",
           formula: "(geladen + entladen) ÷ (2 × 2,24 kWh)",
-          description:
-            "Anzahl effektiver Voll-Lade-Entlade-Zyklen im Zeitraum. Tag typisch < 1, Woche 3–7, Monat 20–40.",
+          description: `Anzahl effektiver Voll-Lade-Entlade-Zyklen im Zeitraum. ${cycleHealth(totalCycles).sentence}`,
         },
       },
       home: {
@@ -326,24 +335,25 @@ export default async function Page({
   // ─── Live tab ───────────────────────────────────────────────────────────
   if (period === "live") {
     const todayRange = rangeFor("today", new Date(), settings.timezone);
-    const [latestShelly, latestMarstek, todayShelly, todayMarstek] = await Promise.all([
-      fetchLatestShelly(),
-      fetchLatestMarstek(),
-      fetchShellyRange(todayRange.from, todayRange.to),
-      fetchMarstekRange(todayRange.from, todayRange.to),
-    ]);
+    const [latestShelly, latestMarstek, todayShelly, todayMarstek, lifetimeDaily] =
+      await Promise.all([
+        fetchLatestShelly(),
+        fetchLatestMarstek(),
+        fetchShellyRange(todayRange.from, todayRange.to),
+        fetchMarstekRange(todayRange.from, todayRange.to),
+        fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
+      ]);
     const live = deriveLive(latestShelly, latestMarstek, latestMarstek?.raw ?? null);
     const todayAgg = computePeriodAggregates(todayShelly, todayMarstek, settings);
+    const totalCycles = lifetimeCyclesFromDaily(lifetimeDaily);
     const lastUpdate =
       [latestShelly?.ts, latestMarstek?.ts]
         .filter((x): x is string => Boolean(x))
         .sort()
         .reverse()[0] ?? null;
 
-    const diagram = buildLiveDiagram(live, todayAgg);
-    const todayPoints = enrichStacked(
-      bucketTimeSeries(mergeTimeSeries(todayShelly, todayMarstek), DAY_BUCKET_MS),
-    );
+    const diagram = buildLiveDiagram(live, todayAgg, totalCycles);
+    const hourly = hourlyEnergyFromPoints(mergeTimeSeries(todayShelly, todayMarstek));
 
     return (
       <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -381,16 +391,12 @@ export default async function Page({
 
         <Card className="mt-4">
           <CardHeader>
-            <CardLabel>Verlauf heute</CardLabel>
+            <CardLabel>Stundenbilanz heute</CardLabel>
           </CardHeader>
           <CardBody>
-            <StackedAreaChart
-              points={todayPoints}
-              fromMs={todayRange.from.getTime()}
-              toMs={todayRange.from.getTime() + DAY_MS}
-            />
+            <HourlyBarChart hours={hourly} fromMs={todayRange.from.getTime()} />
             <div className="mt-3">
-              <StackedAreaLegend />
+              <FlowLegend />
             </div>
           </CardBody>
         </Card>
@@ -434,29 +440,34 @@ export default async function Page({
   let hourlyPoints: HourlyEnergyPoint[] | null = null;
   let dailyBars: DailyAggregate[] | null = null;
   let bands: DailySocBand[] = [];
+  let totalCycles: number;
 
   if (aggPeriod === "today") {
-    const [shelly, marstek, prevShelly, prevMarstek] = await Promise.all([
+    const [shelly, marstek, prevShelly, prevMarstek, lifetimeDaily] = await Promise.all([
       fetchShellyRange(range.from, range.to),
       fetchMarstekRange(range.from, range.to),
       fetchShellyRange(prevRange.from, prevRange.to),
       fetchMarstekRange(prevRange.from, prevRange.to),
+      fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
     ]);
     periodAgg = computePeriodAggregates(shelly, marstek, settings);
     prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
     hourlyPoints = hourlyEnergyFromPoints(mergeTimeSeries(shelly, marstek));
+    totalCycles = lifetimeCyclesFromDaily(lifetimeDaily);
   } else {
-    const [daily, prevDaily] = await Promise.all([
+    const [daily, prevDaily, lifetimeDaily] = await Promise.all([
       fetchDailyAggregates(range.from, range.to, settings.timezone),
       fetchDailyAggregates(prevRange.from, prevRange.to, settings.timezone),
+      fetchDailyAggregates(DATA_EPOCH, new Date(), settings.timezone),
     ]);
     periodAgg = periodAggregatesFromDaily(daily, settings);
     prevAgg = periodAggregatesFromDaily(prevDaily, settings);
     dailyBars = dailyAggregatesFromRpc(daily);
     bands = socBandsFromDaily(daily);
+    totalCycles = lifetimeCyclesFromDaily(lifetimeDaily);
   }
 
-  const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod, settings);
+  const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod, settings, totalCycles);
   const dayTicks = aggPeriod === "today" ? [] : dayTicksFor(range);
   const balanceLabel =
     aggPeriod === "today" && range.isCurrent ? "heute" : range.shortLabel;
@@ -527,7 +538,15 @@ export default async function Page({
       {aggPeriod !== "today" ? (
         <Card className="mt-4">
           <CardHeader>
-            <CardLabel>Speicher SOC (Tages-Min/Max)</CardLabel>
+            <div className="flex items-baseline justify-between gap-3">
+              <CardLabel>Speicher SOC (Tages-Min/Max)</CardLabel>
+              <div className="shrink-0 text-xs text-ink-500">
+                <span className="font-mono tabular-nums text-battery">
+                  {fmtCycles(totalCycles)}
+                </span>{" "}
+                Zyklen gesamt · {cycleHealth(totalCycles).pctLabel} % von ~6.000
+              </div>
+            </div>
           </CardHeader>
           <CardBody>
             <SocChartBands bands={bands} dayTicks={dayTicks} />
