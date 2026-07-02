@@ -12,22 +12,7 @@ import {
 } from "recharts";
 import { formatTime, formatW } from "@/lib/format";
 import type { StackedAreaPoint } from "@/lib/timeseries";
-
-const C = {
-  pvDirect: "#10b981",
-  batteryDischarge: "#f97316",
-  gridImport: "#dc2626",
-  batteryCharge: "#86efac",
-  gridExport: "#3b82f6",
-};
-
-const SERIES = [
-  { key: "pvDirect", label: "PV-direkt → Wohnung", color: C.pvDirect, sign: 1 },
-  { key: "batteryDischarge", label: "Speicher → Wohnung", color: C.batteryDischarge, sign: 1 },
-  { key: "gridImport", label: "Netz → Wohnung", color: C.gridImport, sign: 1 },
-  { key: "batteryCharge", label: "PV → Speicher", color: C.batteryCharge, sign: -1 },
-  { key: "gridExport", label: "Wohnung → Netz", color: C.gridExport, sign: -1 },
-] as const;
+import { FLOW_COLORS as C, FLOW_SERIES as SERIES, FlowLegend } from "./chart-shared";
 
 // Y-axis hard clip. Inrush spikes (kettle, coffee machine) often briefly read
 // 5–20 kW for ~1 s and crush the visible range otherwise. 3 kW covers every
@@ -85,7 +70,16 @@ function CustomTooltip({ active, label, payload }: TooltipProps) {
   );
 }
 
-export function StackedAreaChart({ points }: { points: StackedAreaPoint[] }) {
+export function StackedAreaChart({
+  points,
+  fromMs,
+  toMs,
+}: {
+  points: StackedAreaPoint[];
+  /** Full-day domain — the axis always spans 00–24 h, not just "until now". */
+  fromMs?: number;
+  toMs?: number;
+}) {
   if (!points.length) {
     return (
       <div className="flex h-[280px] items-center justify-center text-sm text-ink-500">
@@ -93,6 +87,10 @@ export function StackedAreaChart({ points }: { points: StackedAreaPoint[] }) {
       </div>
     );
   }
+  const hasDomain = fromMs != null && toMs != null;
+  const hourTicks = hasDomain
+    ? Array.from({ length: 7 }, (_, i) => fromMs + (i * (toMs - fromMs)) / 6)
+    : undefined;
   return (
     <ResponsiveContainer width="100%" height={280}>
       <AreaChart data={points} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -100,7 +98,9 @@ export function StackedAreaChart({ points }: { points: StackedAreaPoint[] }) {
         <XAxis
           dataKey="tsMs"
           type="number"
-          domain={["dataMin", "dataMax"]}
+          domain={hasDomain ? [fromMs, toMs] : ["dataMin", "dataMax"]}
+          ticks={hourTicks}
+          allowDataOverflow
           tickFormatter={(v: number) => formatTime(new Date(v).toISOString())}
           stroke="#a1a1aa"
           tickLine={false}
@@ -129,14 +129,5 @@ export function StackedAreaChart({ points }: { points: StackedAreaPoint[] }) {
 }
 
 export function StackedAreaLegend() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-600">
-      {SERIES.map((s) => (
-        <div key={s.key} className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
-          <span>{s.label}</span>
-        </div>
-      ))}
-    </div>
-  );
+  return <FlowLegend />;
 }

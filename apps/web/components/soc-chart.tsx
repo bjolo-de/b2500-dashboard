@@ -15,6 +15,7 @@ import {
 import type { ChartPoint } from "@/lib/timeseries";
 import type { DailySocBand } from "@/lib/timeseries";
 import { formatTime } from "@/lib/format";
+import { calendarDomain, dayTickLabel, labelTicks } from "./chart-shared";
 
 export function SocChartToday({ points }: { points: ChartPoint[] }) {
   const data = points.filter((p) => p.soc != null);
@@ -77,7 +78,14 @@ export function SocChartToday({ points }: { points: ChartPoint[] }) {
 }
 
 // Min/max bands per day for week/month views.
-export function SocChartBands({ bands }: { bands: DailySocBand[] }) {
+export function SocChartBands({
+  bands,
+  dayTicks = [],
+}: {
+  bands: DailySocBand[];
+  /** Noon-anchored ms per calendar day — keeps the axis aligned with the bar chart. */
+  dayTicks?: number[];
+}) {
   if (bands.length === 0) {
     return (
       <div className="flex h-[180px] items-center justify-center text-sm text-ink-500">
@@ -93,6 +101,7 @@ export function SocChartBands({ bands }: { bands: DailySocBand[] }) {
     delta: (b.max - b.min) / 2,
     label: b.date,
   }));
+  const domain = calendarDomain(dayTicks) ?? (["dataMin", "dataMax"] as const);
   return (
     <ResponsiveContainer width="100%" height={180}>
       <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -100,13 +109,10 @@ export function SocChartBands({ bands }: { bands: DailySocBand[] }) {
         <XAxis
           dataKey="dateMs"
           type="number"
-          domain={["dataMin", "dataMax"]}
-          tickFormatter={(v: number) =>
-            new Date(v).toLocaleDateString("de-DE", {
-              day: "2-digit",
-              month: "2-digit",
-            })
-          }
+          domain={domain as [number, number]}
+          ticks={dayTicks.length ? labelTicks(dayTicks) : undefined}
+          interval={0}
+          tickFormatter={dayTickLabel}
           tick={{ fontSize: 11 }}
           stroke="#a1a1aa"
           tickLine={false}

@@ -229,6 +229,10 @@ export type DailyAggregate = {
   importKwh: number;
   exportKwh: number;
   netSaldoKwh: number;   // + = net bezug, − = net einspeisung
+  // Consumption composition (kWh) — same flow semantics as the day view
+  pvToHomeKwh: number;
+  batteryToHomeKwh: number;
+  pvToBatteryKwh: number;
   cyclesEquivalent: number;
   socMinPct: number | null;
   socMaxPct: number | null;
@@ -336,6 +340,9 @@ export function dailyAggregatesFromRpc(
       importKwh: d.import_kwh,
       exportKwh: d.export_kwh,
       netSaldoKwh: d.import_kwh - d.export_kwh,
+      pvToHomeKwh: d.pv_to_home_kwh,
+      batteryToHomeKwh: d.battery_to_home_kwh,
+      pvToBatteryKwh: d.pv_to_battery_kwh,
       cyclesEquivalent,
       socMinPct: d.soc_min_pct,
       socMaxPct: d.soc_max_pct,

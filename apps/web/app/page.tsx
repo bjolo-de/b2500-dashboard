@@ -26,6 +26,7 @@ import {
   type DailySocBand,
 } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
+import { addDays, format } from "date-fns";
 import {
   AGGREGATE_PERIODS,
   parseAnchor,
@@ -74,6 +75,19 @@ const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 
 // transient inrush spikes (kettle, coffee machine inductive bursts often
 // briefly read 10–20 kW for ~1 s) without losing meaningful sustained loads.
 const DAY_BUCKET_MS = 5 * 60 * 1000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// One noon-anchored tick per calendar day of the period (same anchor as
+// dailyAggregatesFromRpc), so week/month charts always span the full
+// calendar range — data present or not.
+function dayTicksFor(range: Range): number[] {
+  const ticks: number[] = [];
+  for (let d = range.from; d.getTime() < range.to.getTime(); d = addDays(d, 1)) {
+    ticks.push(new Date(format(d, "yyyy-MM-dd") + "T12:00:00Z").getTime());
+  }
+  return ticks;
+}
 
 // ─── Display formatters ───────────────────────────────────────────────────
 
@@ -361,7 +375,11 @@ export default async function Page({
             <CardLabel>Verlauf heute</CardLabel>
           </CardHeader>
           <CardBody>
-            <StackedAreaChart points={todayPoints} />
+            <StackedAreaChart
+              points={todayPoints}
+              fromMs={todayRange.from.getTime()}
+              toMs={todayRange.from.getTime() + DAY_MS}
+            />
             <div className="mt-3">
               <StackedAreaLegend />
             </div>
@@ -369,7 +387,7 @@ export default async function Page({
         </Card>
 
         <div className="mt-4">
-          <BalanceSummary agg={todayAgg} period="today" />
+          <BalanceSummary agg={todayAgg} label="heute" />
         </div>
 
         <TariffFooter settings={settings} />
@@ -432,6 +450,9 @@ export default async function Page({
   }
 
   const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod, settings);
+  const dayTicks = aggPeriod === "today" ? [] : dayTicksFor(range);
+  const balanceLabel =
+    aggPeriod === "today" && range.isCurrent ? "heute" : range.shortLabel;
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-6 sm:py-10">
@@ -475,21 +496,23 @@ export default async function Page({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardLabel>
-            {aggPeriod === "today" ? "Verlauf" : aggPeriod === "week" ? "Tagesbilanz" : "Monatsbilanz"}
-          </CardLabel>
+          <CardLabel>{aggPeriod === "today" ? "Verlauf" : "Tagesbilanz"}</CardLabel>
         </CardHeader>
         <CardBody>
           {dayPoints ? (
             <>
-              <StackedAreaChart points={dayPoints} />
+              <StackedAreaChart
+                points={dayPoints}
+                fromMs={range.from.getTime()}
+                toMs={range.from.getTime() + DAY_MS}
+              />
               <div className="mt-3">
                 <StackedAreaLegend />
               </div>
             </>
           ) : dailyBars ? (
             <>
-              <DailyBarChart days={dailyBars} />
+              <DailyBarChart days={dailyBars} dayTicks={dayTicks} />
               <div className="mt-3">
                 <DailyBarLegend />
               </div>
@@ -504,13 +527,13 @@ export default async function Page({
             <CardLabel>Speicher SOC (Tages-Min/Max)</CardLabel>
           </CardHeader>
           <CardBody>
-            <SocChartBands bands={bands} />
+            <SocChartBands bands={bands} dayTicks={dayTicks} />
           </CardBody>
         </Card>
       ) : null}
 
       <div className="mt-4">
-        <BalanceSummary agg={periodAgg} period={aggPeriod} />
+        <BalanceSummary agg={periodAgg} label={balanceLabel} />
       </div>
 
       <TariffFooter settings={settings} />

@@ -27,6 +27,16 @@ export function formatWh(wh: number | null | undefined): string {
   return `${intl2.format(wh / 1000)} kWh`;
 }
 
+export function formatKwh(kwh: number | null | undefined): string {
+  if (kwh == null) return "—";
+  return `${intl2.format(kwh)} kWh`;
+}
+
+export function formatNumber2(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return intl2.format(v);
+}
+
 export function formatPercent(p: number | null | undefined): string {
   if (p == null) return "—";
   return `${intl.format(p)} %`;

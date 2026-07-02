@@ -1,31 +1,22 @@
 import { Card, CardBody, CardHeader, CardLabel } from "./ui/card";
 import { InfoTooltip } from "./info-tooltip";
-import { formatEur } from "@/lib/format";
+import { formatEur, formatKwh } from "@/lib/format";
 import type { PeriodAggregates } from "@/lib/aggregates";
-
-const PERIOD_LABEL: Record<string, string> = {
-  today: "heute",
-  week: "in den letzten 7 Tagen",
-  month: "im letzten Monat",
-};
 
 type Props = {
   agg: PeriodAggregates;
-  period: "today" | "week" | "month";
+  /** Period the numbers cover, e.g. "heute", "KW 27 / 2026", "Juli 2026". */
+  label: string;
 };
 
-
-
-export function BalanceSummary({ agg, period }: Props) {
-  const label = PERIOD_LABEL[period] ?? "im Zeitraum";
-
+export function BalanceSummary({ agg, label }: Props) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-baseline justify-between">
-          <CardLabel>Bilanz {label}</CardLabel>
+        <div className="flex items-baseline justify-between gap-3">
+          <CardLabel className="truncate">Bilanz {label}</CardLabel>
           {agg.costAvoidedEur > 0 ? (
-            <div className="text-xs text-ink-500">
+            <div className="shrink-0 text-xs text-ink-500">
               <span className="font-mono tabular-nums text-pv">
                 {formatEur(agg.costAvoidedEur)}
               </span>{" "}
@@ -38,12 +29,12 @@ export function BalanceSummary({ agg, period }: Props) {
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Metric
             label="PV produziert"
-            value={`${agg.pvProducedKwh.toFixed(2)} kWh`}
+            value={formatKwh(agg.pvProducedKwh)}
             color="text-pv"
           />
           <Metric
             label="Verbrauch"
-            value={`${agg.consumptionKwh.toFixed(2)} kWh`}
+            value={formatKwh(agg.consumptionKwh)}
           />
           <Metric
             label="Eigenverbrauch"
@@ -80,23 +71,24 @@ export function BalanceSummary({ agg, period }: Props) {
         <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Metric
             label="Netz-Bezug"
-            value={`${agg.importKwh.toFixed(2)} kWh`}
+            value={formatKwh(agg.importKwh)}
             sub={agg.costImportedEur > 0 ? formatEur(agg.costImportedEur) : undefined}
-            color="text-grid"
+            color="text-alert"
           />
           <Metric
             label="Einspeisung"
-            value={`${agg.exportKwh.toFixed(2)} kWh`}
+            value={formatKwh(agg.exportKwh)}
             sub={agg.feedInRevenueEur > 0 ? formatEur(agg.feedInRevenueEur) : undefined}
+            color="text-grid"
           />
           <Metric
-            label="Akku-Ladung"
-            value={`${agg.batteryChargedKwh.toFixed(2)} kWh`}
+            label="Speicher geladen"
+            value={formatKwh(agg.batteryChargedKwh)}
             color="text-battery"
           />
           <Metric
-            label="Akku-Entladung"
-            value={`${agg.batteryDischargedKwh.toFixed(2)} kWh`}
+            label="Speicher entladen"
+            value={formatKwh(agg.batteryDischargedKwh)}
             color="text-battery"
           />
         </div>
@@ -128,9 +120,9 @@ function Metric({
   info?: { title: string; formula?: string; description: string };
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="flex items-center text-[11px] font-medium uppercase tracking-wide text-ink-500">
-        <span>{label}</span>
+        <span className="truncate">{label}</span>
         {info ? (
           <InfoTooltip
             title={info.title}

@@ -221,7 +221,9 @@ function FlowArc({
   const labelHeight = showTrend ? 30 : 20;
   const labelY = labelPos.y - 11;
   const trendY = labelPos.y + 11;
-  const labelWidth = 56;
+  // Fit the pill to the text (11px mono ≈ 6.6px/char) so long values like
+  // "16,60 kWh" don't overflow the fixed box.
+  const labelWidth = Math.max(48, flow.label.length * 6.6 + 12);
 
   return (
     <g style={{ cursor: "pointer" }} onClick={onActivate} onMouseEnter={onActivate}>
@@ -233,7 +235,9 @@ function FlowArc({
               <animateMotion
                 dur={`${duration}s`}
                 repeatCount="indefinite"
-                begin={`${(i * duration) / dots}s`}
+                // Negative begin = dots start mid-path instead of flashing at
+                // the SVG origin (top-left) until their stagger delay elapses.
+                begin={`${-((i * duration) / dots)}s`}
                 path={d}
                 keyPoints={reverse ? "1;0" : "0;1"}
                 keyTimes="0;1"
@@ -355,13 +359,16 @@ export function FlowDiagram({ modules, flows, tooltips }: Props) {
         ? COLORS.gridImport
         : COLORS.home;
 
+  // minHeight instead of a fixed height: on narrow viewports the scaled slot
+  // gets shorter than three lines of card content — the card may grow a few
+  // px past its slot rather than spill text across its own border.
   const cardStyle = (c: Card, total: Total) =>
     ({
       position: "absolute",
       left: `${(c.x / total.W) * 100}%`,
       top: `${(c.y / total.H) * 100}%`,
       width: `${(c.w / total.W) * 100}%`,
-      height: `${(c.h / total.H) * 100}%`,
+      minHeight: `${(c.h / total.H) * 100}%`,
     }) as React.CSSProperties;
 
   const renderArcs = (paths: Paths, labels: Labels) => (

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { formatNumber2 } from "@/lib/format";
 import type { UserSettings } from "@/lib/queries";
 
 type Props = {
@@ -21,10 +22,10 @@ export function TariffFooter({ settings }: Props) {
           "underline-offset-4 hover:underline",
         )}
       >
-        Tarif {Number(settings.energy_price_ct_kwh).toFixed(2)} ct/kWh ·
-        Grundgebühr {Number(settings.base_fee_eur_month).toFixed(2)} €/Monat
+        Tarif {formatNumber2(Number(settings.energy_price_ct_kwh))} ct/kWh ·
+        Grundgebühr {formatNumber2(Number(settings.base_fee_eur_month))} €/Monat
         {Number(settings.feed_in_ct_kwh) > 0
-          ? ` · Einspeisung ${Number(settings.feed_in_ct_kwh).toFixed(2)} ct/kWh`
+          ? ` · Einspeisung ${formatNumber2(Number(settings.feed_in_ct_kwh))} ct/kWh`
           : ""}
       </button>
       <AnimatePresence>
