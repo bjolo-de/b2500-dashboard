@@ -87,6 +87,66 @@ export function enrichStacked(points: ChartPoint[]): StackedAreaPoint[] {
   });
 }
 
+// ─── Hourly energy (day view) ─────────────────────────────────────────────
+// The day view shows energy per hour instead of a power curve: integrating
+// over an hour flattens short inrush spikes (2 kW kettle × 3 min = 0,1 kWh)
+// that otherwise crush the scale, and matches the week/month bar semantics.
+
+export type HourlyEnergyPoint = {
+  /** Hour center (start + 30 min) — bar anchor on the numeric x-axis. */
+  hourMs: number;
+  hourStartMs: number;
+  pvDirectKwh: number;
+  batteryDischargeKwh: number;
+  gridImportKwh: number;
+  batteryChargeKwh: number; // negative, stacks below zero
+  gridExportKwh: number;    // negative, stacks below zero
+  consumptionKwh: number;
+};
+
+const HOUR_MS = 60 * 60 * 1000;
+
+// Trapezoidal integration per flow, binned by interval midpoint — the same
+// scheme as computePeriodAggregates, so hour sums line up with day totals.
+export function hourlyEnergyFromPoints(points: ChartPoint[]): HourlyEnergyPoint[] {
+  const flows = {
+    pvDirect: (p: ChartPoint) => Math.min(p.pv ?? 0, p.output ?? 0),
+    batteryDischarge: (p: ChartPoint) => Math.max(0, (p.output ?? 0) - (p.pv ?? 0)),
+    gridImport: (p: ChartPoint) => Math.max(0, p.saldo ?? 0),
+    batteryCharge: (p: ChartPoint) => Math.max(0, (p.pv ?? 0) - (p.output ?? 0)),
+    gridExport: (p: ChartPoint) => Math.max(0, -(p.saldo ?? 0)),
+  };
+  const hours = new Map<number, Record<keyof typeof flows, number>>();
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const cur = points[i];
+    const dtMs = cur.tsMs - prev.tsMs;
+    if (dtMs <= 0 || dtMs > 600_000) continue;
+    const hourKey = Math.floor((prev.tsMs + dtMs / 2) / HOUR_MS) * HOUR_MS;
+    let h = hours.get(hourKey);
+    if (!h) {
+      h = { pvDirect: 0, batteryDischarge: 0, gridImport: 0, batteryCharge: 0, gridExport: 0 };
+      hours.set(hourKey, h);
+    }
+    for (const key of Object.keys(flows) as (keyof typeof flows)[]) {
+      const f = flows[key];
+      h[key] += (((f(prev) + f(cur)) / 2) * dtMs) / 3_600_000 / 1000; // W·ms → kWh
+    }
+  }
+  return Array.from(hours.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([hourStartMs, h]) => ({
+      hourMs: hourStartMs + HOUR_MS / 2,
+      hourStartMs,
+      pvDirectKwh: h.pvDirect,
+      batteryDischargeKwh: h.batteryDischarge,
+      gridImportKwh: h.gridImport,
+      batteryChargeKwh: -h.batteryCharge,
+      gridExportKwh: -h.gridExport,
+      consumptionKwh: h.pvDirect + h.batteryDischarge + h.gridImport,
+    }));
+}
+
 // Bucket points into fixed time windows for week/month chart resolution.
 // Average power values, last-value SOC. If bucketSizeMs <= 0 → returns input.
 export function bucketTimeSeries(points: ChartPoint[], bucketSizeMs: number): ChartPoint[] {

@@ -14,27 +14,53 @@ import { formatTime, formatW } from "@/lib/format";
 import type { StackedAreaPoint } from "@/lib/timeseries";
 import { FLOW_COLORS as C, FLOW_SERIES as SERIES, FlowLegend } from "./chart-shared";
 
-// Y-axis hard clip. Inrush spikes (kettle, coffee machine) often briefly read
-// 5–20 kW for ~1 s and crush the visible range otherwise. 3 kW covers every
-// realistic sustained household load in this apartment. Values beyond are
-// drawn outside the plot area and Recharts clips them via its built-in
-// clipPath; the tooltip still reports the raw value.
-const Y_CLIP = 3000;
+// Adaptive, asymmetric y-scale. Base load here is ~50–100 W and PV tops out
+// around 800 W, while inrush spikes (kettle, coffee machine) briefly read
+// multiple kW — a fixed symmetric ±3 kW domain leaves the interesting
+// structure as a hairline at zero. Instead each side is scaled to the 99th
+// percentile of its stacked sum, rounded up to a clean step; the rare spike
+// beyond is clipped (Recharts clipPath) and the tooltip reports raw values.
+const Y_CLIP_MAX = 3000;
+const NICE_STEPS = [200, 300, 400, 500, 750, 1000, 1500, 2000, 2500, 3000];
+
+function niceCeil(v: number): number {
+  return NICE_STEPS.find((s) => s >= v) ?? Y_CLIP_MAX;
+}
+
+function percentile(values: number[], q: number): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(q * (sorted.length - 1))];
+}
+
+// p95 rather than p99: cooking sessions span enough 5-min buckets that p99
+// still lands on the spike level and re-inflates the scale.
+function adaptiveClips(points: StackedAreaPoint[]): { pos: number; neg: number } {
+  const posSums = points.map((p) => p.pvDirect + p.batteryDischarge + p.gridImport);
+  const negSums = points.map((p) => -(p.batteryCharge + p.gridExport));
+  return {
+    pos: Math.min(Y_CLIP_MAX, niceCeil(Math.max(400, percentile(posSums, 0.95)))),
+    neg: Math.min(Y_CLIP_MAX, niceCeil(Math.max(200, percentile(negSums, 0.95)))),
+  };
+}
 
 type TooltipProps = {
   active?: boolean;
   label?: number;
   payload?: Array<{ payload?: StackedAreaPoint }>;
+  posClip?: number;
+  negClip?: number;
 };
 
-function CustomTooltip({ active, label, payload }: TooltipProps) {
+function CustomTooltip({ active, label, payload, posClip, negClip }: TooltipProps) {
   if (!active || !payload?.length || label == null) return null;
   const data = payload[0]?.payload;
   if (!data) return null;
   const consumption = data.pvDirect + data.batteryDischarge + data.gridImport;
   const surplus = -(data.batteryCharge + data.gridExport);
   const clipped =
-    consumption > Y_CLIP || surplus > Y_CLIP;
+    (posClip != null && consumption > posClip) ||
+    (negClip != null && surplus > negClip);
   return (
     <div className="rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs shadow-lg">
       <div className="font-medium text-ink-900">
@@ -62,7 +88,7 @@ function CustomTooltip({ active, label, payload }: TooltipProps) {
         ) : null}
         {clipped ? (
           <div className="mt-1 text-[10px] italic text-ink-400">
-            Skala bei ±{Y_CLIP / 1000} kW geclippt — Echtwerte siehe oben
+            Skala bei {formatW(posClip ?? 0)} geclippt — Echtwerte siehe oben
           </div>
         ) : null}
       </div>
@@ -91,6 +117,7 @@ export function StackedAreaChart({
   const hourTicks = hasDomain
     ? Array.from({ length: 7 }, (_, i) => fromMs + (i * (toMs - fromMs)) / 6)
     : undefined;
+  const clips = adaptiveClips(points);
   return (
     <ResponsiveContainer width="100%" height={280}>
       <AreaChart data={points} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -107,7 +134,7 @@ export function StackedAreaChart({
           tick={{ fontSize: 11 }}
         />
         <YAxis
-          domain={[-Y_CLIP, Y_CLIP]}
+          domain={[-clips.neg, clips.pos]}
           allowDataOverflow
           tickFormatter={(v: number) => formatW(v)}
           stroke="#a1a1aa"
@@ -122,7 +149,7 @@ export function StackedAreaChart({
         <Area type="linear" dataKey="gridImport"       stackId="pos" stroke={C.gridImport}       fill={C.gridImport}       fillOpacity={0.55} isAnimationActive={false} />
         <Area type="linear" dataKey="batteryCharge"    stackId="neg" stroke={C.batteryCharge}    fill={C.batteryCharge}    fillOpacity={0.6}  isAnimationActive={false} />
         <Area type="linear" dataKey="gridExport"       stackId="neg" stroke={C.gridExport}       fill={C.gridExport}       fillOpacity={0.6}  isAnimationActive={false} />
-        <Tooltip content={<CustomTooltip />} />
+        <Tooltip content={<CustomTooltip posClip={clips.pos} negClip={clips.neg} />} />
       </AreaChart>
     </ResponsiveContainer>
   );

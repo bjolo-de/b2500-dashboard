@@ -85,7 +85,7 @@ function Row({ color, label, value }: { color: string; label: string; value: num
 
 function axisKwh(v: number): string {
   const s = Number.isInteger(v) ? String(v) : v.toFixed(1).replace(".", ",");
-  return `${s} kWh`;
+  return `${s} kWh`; // nbsp — Recharts wraps tick text on plain spaces
 }
 
 export function DailyBarChart({

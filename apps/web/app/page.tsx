@@ -21,9 +21,11 @@ import { classifyHealth } from "@/lib/system-health";
 import {
   bucketTimeSeries,
   enrichStacked,
+  hourlyEnergyFromPoints,
   mergeTimeSeries,
   socBandsFromDaily,
   type DailySocBand,
+  type HourlyEnergyPoint,
 } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
 import { addDays, format } from "date-fns";
@@ -48,6 +50,8 @@ import {
 import { BalanceSummary } from "@/components/balance-summary";
 import { StackedAreaChart, StackedAreaLegend } from "@/components/stacked-area-chart";
 import { DailyBarChart, DailyBarLegend } from "@/components/daily-bar-chart";
+import { HourlyBarChart } from "@/components/hourly-bar-chart";
+import { FlowLegend } from "@/components/chart-shared";
 import { SocChartBands } from "@/components/soc-chart";
 import { TariffFooter } from "@/components/tariff-footer";
 import { AutoRefresh } from "@/components/auto-refresh";
@@ -422,7 +426,7 @@ export default async function Page({
   // which collapses ~10k–43k row reads into a single pre-aggregated call.
   let periodAgg: PeriodAggregates;
   let prevAgg: PeriodAggregates;
-  let dayPoints: ReturnType<typeof enrichStacked> | null = null;
+  let hourlyPoints: HourlyEnergyPoint[] | null = null;
   let dailyBars: DailyAggregate[] | null = null;
   let bands: DailySocBand[] = [];
 
@@ -435,9 +439,7 @@ export default async function Page({
     ]);
     periodAgg = computePeriodAggregates(shelly, marstek, settings);
     prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
-    dayPoints = enrichStacked(
-      bucketTimeSeries(mergeTimeSeries(shelly, marstek), DAY_BUCKET_MS),
-    );
+    hourlyPoints = hourlyEnergyFromPoints(mergeTimeSeries(shelly, marstek));
   } else {
     const [daily, prevDaily] = await Promise.all([
       fetchDailyAggregates(range.from, range.to, settings.timezone),
@@ -496,18 +498,14 @@ export default async function Page({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardLabel>{aggPeriod === "today" ? "Verlauf" : "Tagesbilanz"}</CardLabel>
+          <CardLabel>{aggPeriod === "today" ? "Stundenbilanz" : "Tagesbilanz"}</CardLabel>
         </CardHeader>
         <CardBody>
-          {dayPoints ? (
+          {hourlyPoints ? (
             <>
-              <StackedAreaChart
-                points={dayPoints}
-                fromMs={range.from.getTime()}
-                toMs={range.from.getTime() + DAY_MS}
-              />
+              <HourlyBarChart hours={hourlyPoints} fromMs={range.from.getTime()} />
               <div className="mt-3">
-                <StackedAreaLegend />
+                <FlowLegend />
               </div>
             </>
           ) : dailyBars ? (
