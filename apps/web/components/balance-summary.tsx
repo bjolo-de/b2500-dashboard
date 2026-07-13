@@ -1,7 +1,12 @@
 import { Card, CardBody, CardHeader, CardLabel } from "./ui/card";
 import { InfoTooltip } from "./info-tooltip";
 import { formatEur, formatKwh } from "@/lib/format";
-import type { PeriodAggregates } from "@/lib/aggregates";
+import { CO2_KG_PER_KWH, type PeriodAggregates } from "@/lib/aggregates";
+
+const intl1 = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 
 type Props = {
   agg: PeriodAggregates;
@@ -15,12 +20,23 @@ export function BalanceSummary({ agg, label }: Props) {
       <CardHeader>
         <div className="flex items-baseline justify-between gap-3">
           <CardLabel className="truncate">Bilanz {label}</CardLabel>
-          {agg.costAvoidedEur > 0 ? (
-            <div className="shrink-0 text-xs text-ink-500">
-              <span className="font-mono tabular-nums text-pv">
-                {formatEur(agg.costAvoidedEur)}
-              </span>{" "}
-              eingespart
+          {agg.costAvoidedEur > 0 || agg.pvProducedKwh > 0.01 ? (
+            <div className="flex shrink-0 items-center text-xs text-ink-500">
+              <span>
+                <span className="font-mono tabular-nums text-pv">
+                  {formatEur(agg.costAvoidedEur)}
+                </span>
+                {" · "}
+                <span className="font-mono tabular-nums text-pv">
+                  {intl1.format(agg.pvProducedKwh * CO2_KG_PER_KWH)} kg CO₂
+                </span>{" "}
+                eingespart
+              </span>
+              <InfoTooltip
+                title="Einsparung"
+                formula="(Verbrauch − Bezug) × Tarif · PV × 0,38 kg CO₂/kWh"
+                description="Kosten: Rechnungs-Differenz gegenüber einem Haushalt ohne PV. CO₂: erzeugte PV-Energie bewertet mit dem deutschen Strommix (~380 g/kWh, UBA)."
+              />
             </div>
           ) : null}
         </div>

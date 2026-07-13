@@ -1,9 +1,9 @@
 import {
+  fetchAllRollups,
   fetchDailyAggregates,
   fetchHeartbeats,
   fetchLatestMarstek,
   fetchLatestShelly,
-  fetchLifetimeBatteryThroughput,
   fetchMarstekRange,
   fetchShellyRange,
   fetchUserSettings,
@@ -15,9 +15,13 @@ import {
   dailyAggregatesFromRpc,
   deriveLive,
   lifetimeCyclesFromDaily,
+  lifetimeTotalsFromDaily,
+  monthlyAggregatesFromDaily,
   periodAggregatesFromDaily,
   type DailyAggregate,
+  type LifetimeTotals,
   type LiveState,
+  type MonthlyAggregate,
   type PeriodAggregates,
 } from "@/lib/aggregates";
 import { classifyHealth } from "@/lib/system-health";
@@ -30,6 +34,7 @@ import {
 } from "@/lib/timeseries";
 import { formatRelative } from "@/lib/format";
 import { addDays, format } from "date-fns";
+import { TZDate } from "@date-fns/tz";
 import {
   AGGREGATE_PERIODS,
   parseAnchor,
@@ -51,6 +56,8 @@ import {
 import { BalanceSummary } from "@/components/balance-summary";
 import { DailyBarChart, DailyBarLegend } from "@/components/daily-bar-chart";
 import { HourlyBarChart } from "@/components/hourly-bar-chart";
+import { MonthlyBarChart } from "@/components/monthly-bar-chart";
+import { LifetimeSummary } from "@/components/lifetime-summary";
 import { FlowLegend } from "@/components/chart-shared";
 import { SocChartBands } from "@/components/soc-chart";
 import { TariffFooter } from "@/components/tariff-footer";
@@ -58,7 +65,7 @@ import { AutoRefresh } from "@/components/auto-refresh";
 
 export const revalidate = 30;
 
-const VALID_PERIODS = new Set<Period>(["live", "today", "week", "month"]);
+const VALID_PERIODS = new Set<Period>(["live", "today", "week", "month", "year"]);
 
 function asPeriod(s: string | string[] | undefined): Period {
   const v = Array.isArray(s) ? s[0] : s;
@@ -72,8 +79,9 @@ const TREND_VS: Record<AggregatePeriod, string> = {
   today: "Vortag",
   week: "Vorwoche",
   month: "Vormonat",
+  year: "Vorjahr",
 };
-const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60 };
+const SCALE_KWH: Record<AggregatePeriod, number> = { today: 5, week: 15, month: 60, year: 700 };
 
 // Battery health line shared by the flow-diagram tooltips and the SOC card.
 function cycleHealth(totalCycles: number): { pctLabel: string; sentence: string } {
@@ -339,7 +347,7 @@ export default async function Page({
         fetchLatestMarstek(),
         fetchShellyRange(todayRange.from, todayRange.to),
         fetchMarstekRange(todayRange.from, todayRange.to),
-        fetchLifetimeBatteryThroughput(settings.timezone),
+        fetchAllRollups(settings.timezone),
       ]);
     const live = deriveLive(latestShelly, latestMarstek, latestMarstek?.raw ?? null);
     const todayAgg = computePeriodAggregates(todayShelly, todayMarstek, settings);
@@ -437,6 +445,8 @@ export default async function Page({
   let prevAgg: PeriodAggregates;
   let hourlyPoints: HourlyEnergyPoint[] | null = null;
   let dailyBars: DailyAggregate[] | null = null;
+  let monthlyBars: MonthlyAggregate[] | null = null;
+  let lifetime: LifetimeTotals | null = null;
   let bands: DailySocBand[] = [];
   let totalCycles: number;
 
@@ -446,17 +456,36 @@ export default async function Page({
       fetchMarstekRange(range.from, range.to),
       fetchShellyRange(prevRange.from, prevRange.to),
       fetchMarstekRange(prevRange.from, prevRange.to),
-      fetchLifetimeBatteryThroughput(settings.timezone),
+      fetchAllRollups(settings.timezone),
     ]);
     periodAgg = computePeriodAggregates(shelly, marstek, settings);
     prevAgg = computePeriodAggregates(prevShelly, prevMarstek, settings);
     hourlyPoints = hourlyEnergyFromPoints(mergeTimeSeries(shelly, marstek));
     totalCycles = lifetimeCyclesFromDaily(lifetimeDaily);
+  } else if (aggPeriod === "year") {
+    // The year view slices the full rollup history client-side — one direct
+    // table read serves the monthly bars, the period totals AND the lifetime
+    // card. Never the cached RPC here: a range reaching before logging began
+    // would make it re-aggregate all raw history (see fetchAllRollups).
+    const all = await fetchAllRollups(settings.timezone);
+    const dayStr = (t: Date) =>
+      format(new TZDate(t.getTime(), settings.timezone), "yyyy-MM-dd");
+    const inYear = all.filter(
+      (d) => d.day >= dayStr(range.from) && d.day <= dayStr(range.to),
+    );
+    const inPrev = all.filter(
+      (d) => d.day >= dayStr(prevRange.from) && d.day <= dayStr(prevRange.to),
+    );
+    periodAgg = periodAggregatesFromDaily(inYear, settings);
+    prevAgg = periodAggregatesFromDaily(inPrev, settings);
+    monthlyBars = monthlyAggregatesFromDaily(inYear);
+    lifetime = lifetimeTotalsFromDaily(all, settings);
+    totalCycles = lifetimeCyclesFromDaily(all);
   } else {
     const [daily, prevDaily, lifetimeDaily] = await Promise.all([
       fetchDailyAggregates(range.from, range.to, settings.timezone),
       fetchDailyAggregates(prevRange.from, prevRange.to, settings.timezone),
-      fetchLifetimeBatteryThroughput(settings.timezone),
+      fetchAllRollups(settings.timezone),
     ]);
     periodAgg = periodAggregatesFromDaily(daily, settings);
     prevAgg = periodAggregatesFromDaily(prevDaily, settings);
@@ -466,7 +495,8 @@ export default async function Page({
   }
 
   const diagram = buildAggregateDiagram(periodAgg, prevAgg, aggPeriod, settings, totalCycles);
-  const dayTicks = aggPeriod === "today" ? [] : dayTicksFor(range);
+  const dayTicks =
+    aggPeriod === "week" || aggPeriod === "month" ? dayTicksFor(range) : [];
   const balanceLabel =
     aggPeriod === "today" && range.isCurrent ? "heute" : range.shortLabel;
 
@@ -512,12 +542,25 @@ export default async function Page({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardLabel>{aggPeriod === "today" ? "Stundenbilanz" : "Tagesbilanz"}</CardLabel>
+          <CardLabel>
+            {aggPeriod === "today"
+              ? "Stundenbilanz"
+              : aggPeriod === "year"
+                ? "Monatsbilanz"
+                : "Tagesbilanz"}
+          </CardLabel>
         </CardHeader>
         <CardBody>
           {hourlyPoints ? (
             <>
               <HourlyBarChart hours={hourlyPoints} fromMs={range.from.getTime()} />
+              <div className="mt-3">
+                <FlowLegend />
+              </div>
+            </>
+          ) : monthlyBars ? (
+            <>
+              <MonthlyBarChart months={monthlyBars} year={range.from.getFullYear()} />
               <div className="mt-3">
                 <FlowLegend />
               </div>
@@ -533,7 +576,7 @@ export default async function Page({
         </CardBody>
       </Card>
 
-      {aggPeriod !== "today" ? (
+      {aggPeriod === "week" || aggPeriod === "month" ? (
         <Card className="mt-4">
           <CardHeader>
             <div className="flex items-baseline justify-between gap-3">
@@ -555,6 +598,12 @@ export default async function Page({
       <div className="mt-4">
         <BalanceSummary agg={periodAgg} label={balanceLabel} />
       </div>
+
+      {lifetime ? (
+        <div className="mt-4">
+          <LifetimeSummary totals={lifetime} />
+        </div>
+      ) : null}
 
       <TariffFooter settings={settings} />
     </main>

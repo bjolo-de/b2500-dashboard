@@ -4,11 +4,13 @@ import { useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
+// Ordered by zoom level: the live moment, then ever-wider calendar windows.
 const PERIODS = [
   { key: "live", label: "Live" },
   { key: "today", label: "Tag" },
   { key: "week", label: "Woche" },
   { key: "month", label: "Monat" },
+  { key: "year", label: "Jahr" },
 ] as const;
 
 export function PeriodSwitcher() {

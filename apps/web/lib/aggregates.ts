@@ -227,6 +227,100 @@ export const BATTERY_CAPACITY_WH_CONST = BATTERY_CAPACITY_WH;
 // residual capacity — the reference for the battery-health readout.
 export const BATTERY_CYCLE_LIFE = 6000;
 
+// ─── CO₂ & lifetime totals ────────────────────────────────────────────────
+
+// German grid mix emission factor. UBA reports ~380 g CO₂/kWh for the 2023
+// consumption mix — deliberately NOT the ~1 kg/kWh coal-based factor apps
+// like S-Miles advertise with.
+export const CO2_KG_PER_KWH = 0.38;
+// A mature tree binds roughly 21 kg CO₂ per year — hence "Baum-Jahre".
+export const TREE_CO2_KG_PER_YEAR = 21;
+// Average EU per-capita energy-related CO₂ emissions (~6.9 t/a, EDGAR 2023).
+export const EU_CO2_KG_PER_CAPITA_YEAR = 6900;
+
+export type LifetimeTotals = {
+  pvProducedKwh: number;
+  consumptionKwh: number;
+  savedEur: number;      // bill difference vs. no system, at today's tariff
+  co2SavedKg: number;    // PV production displacing grid mix
+  treeYears: number;
+  euFootprintPct: number; // co2SavedKg as share of an EU citizen's year
+};
+
+export function lifetimeTotalsFromDaily(
+  daily: DailyAggregateRow[],
+  settings: UserSettings,
+): LifetimeTotals {
+  const sum = (f: (d: DailyAggregateRow) => number) =>
+    daily.reduce((acc, d) => acc + f(d), 0);
+  const pvProducedKwh = sum((d) => d.pv_kwh);
+  const consumptionKwh = sum((d) => d.output_kwh + d.import_kwh - d.export_kwh);
+  const importKwh = sum((d) => d.import_kwh);
+  const energyCt = Number(settings.energy_price_ct_kwh);
+  const co2SavedKg = pvProducedKwh * CO2_KG_PER_KWH;
+  return {
+    pvProducedKwh,
+    consumptionKwh,
+    savedEur: Math.max(0, consumptionKwh - importKwh) * (energyCt / 100),
+    co2SavedKg,
+    treeYears: co2SavedKg / TREE_CO2_KG_PER_YEAR,
+    euFootprintPct: (co2SavedKg / EU_CO2_KG_PER_CAPITA_YEAR) * 100,
+  };
+}
+
+// ─── Per-month aggregates (year view) ─────────────────────────────────────
+
+export type MonthlyAggregate = {
+  month: string;   // YYYY-MM
+  monthMs: number; // mid-month anchor for the x-axis
+  pvProducedKwh: number;
+  consumptionKwh: number;
+  importKwh: number;
+  exportKwh: number;
+  pvToHomeKwh: number;
+  batteryToHomeKwh: number;
+  pvToBatteryKwh: number;
+  cyclesEquivalent: number;
+};
+
+export function monthlyAggregatesFromDaily(
+  daily: DailyAggregateRow[],
+): MonthlyAggregate[] {
+  const months = new Map<string, DailyAggregateRow[]>();
+  for (const d of daily) {
+    const key = d.day.slice(0, 7);
+    const list = months.get(key);
+    if (list) list.push(d);
+    else months.set(key, [d]);
+  }
+  return Array.from(months.entries())
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([month, rows]) => {
+      const sum = (f: (d: DailyAggregateRow) => number) =>
+        rows.reduce((acc, d) => acc + f(d), 0);
+      const exportKwh = sum((d) => d.export_kwh);
+      const pvToHomeRaw = sum((d) => d.pv_to_home_kwh);
+      const batteryToHomeRaw = sum((d) => d.battery_to_home_kwh);
+      // Same export adjustment as dailyAggregatesFromRpc: exported energy is
+      // drawn below zero, so the home-directed shares exclude it.
+      const exportFromPv = Math.min(exportKwh, pvToHomeRaw);
+      return {
+        month,
+        monthMs: new Date(month + "-15T12:00:00Z").getTime(),
+        pvProducedKwh: sum((d) => d.pv_kwh),
+        consumptionKwh: sum((d) => d.output_kwh + d.import_kwh - d.export_kwh),
+        importKwh: sum((d) => d.import_kwh),
+        exportKwh,
+        pvToHomeKwh: pvToHomeRaw - exportFromPv,
+        batteryToHomeKwh: Math.max(0, batteryToHomeRaw - (exportKwh - exportFromPv)),
+        pvToBatteryKwh: sum((d) => d.pv_to_battery_kwh),
+        cyclesEquivalent:
+          sum((d) => d.pv_to_battery_kwh + d.battery_to_home_kwh) /
+          (2 * (BATTERY_CAPACITY_WH / 1000)),
+      };
+    });
+}
+
 /** Equivalent full cycles accumulated over all rollup days (since logging began). */
 export function lifetimeCyclesFromDaily(
   daily: Array<Pick<DailyAggregateRow, "pv_to_battery_kwh" | "battery_to_home_kwh">>,

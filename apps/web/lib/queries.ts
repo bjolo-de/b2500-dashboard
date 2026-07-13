@@ -186,30 +186,27 @@ export async function fetchDailyAggregates(
   return (data ?? []) as DailyAggregateRow[];
 }
 
-// Lifetime battery throughput for the cycle-health readout. Reads the
+// Full rollup history (cycle health, lifetime totals, year view). Reads the
 // daily_rollups table DIRECTLY (anon has a read policy) — never through
 // daily_aggregates_cached: an open-ended range makes that RPC treat every
 // pre-logging day as "missing" and re-aggregate the entire raw history on
 // each call, which is exactly the full-table scan the cache exists to avoid.
 // Days-with-data only, so the row count stays tiny (~1 row/day); paginate
 // anyway to stay correct past the 1000-row response cap (~3 years in).
-export type BatteryThroughputRow = {
-  pv_to_battery_kwh: number;
-  battery_to_home_kwh: number;
-};
-
-export async function fetchLifetimeBatteryThroughput(
-  tz: string,
-): Promise<BatteryThroughputRow[]> {
-  const rows: BatteryThroughputRow[] = [];
+// Caveat: the in-progress day is only as fresh as the last RPC call that
+// touched it — irrelevant for lifetime/monthly sums.
+export async function fetchAllRollups(tz: string): Promise<DailyAggregateRow[]> {
+  const rows: DailyAggregateRow[] = [];
   for (let page = 0; ; page++) {
     const { data, error } = await supabase
       .from("daily_rollups")
-      .select("pv_to_battery_kwh, battery_to_home_kwh")
+      .select(
+        "day, pv_kwh, output_kwh, import_kwh, export_kwh, pv_to_battery_kwh, pv_to_home_kwh, battery_to_home_kwh, soc_min_pct, soc_max_pct, soc_end_pct",
+      )
       .eq("tz", tz)
       .order("day", { ascending: true })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-      .returns<BatteryThroughputRow[]>();
+      .returns<DailyAggregateRow[]>();
     if (error) throw error;
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) return rows;

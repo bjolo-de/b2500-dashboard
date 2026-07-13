@@ -15,16 +15,16 @@
 
 import { TZDate } from "@date-fns/tz";
 import {
-  addDays, addMonths, addWeeks,
-  endOfDay, endOfMonth, endOfWeek,
+  addDays, addMonths, addWeeks, addYears,
+  endOfDay, endOfMonth, endOfWeek, endOfYear,
   format, getISOWeek, getISOWeekYear, parseISO,
-  startOfDay, startOfMonth, startOfWeek,
+  startOfDay, startOfMonth, startOfWeek, startOfYear,
 } from "date-fns";
 import { de } from "date-fns/locale";
 
-export type Period = "live" | "today" | "week" | "month";
+export type Period = "live" | "today" | "week" | "month" | "year";
 
-export const AGGREGATE_PERIODS = new Set<Period>(["today", "week", "month"]);
+export const AGGREGATE_PERIODS = new Set<Period>(["today", "week", "month", "year"]);
 
 export type Range = {
   from: Date;
@@ -62,6 +62,9 @@ export function parseAnchor(period: AggregatePeriod, dParam: string | undefined)
     } else if (period === "month") {
       const m = /^(\d{4})-(\d{2})$/.exec(dParam);
       if (m) return new Date(Number(m[1]), Number(m[2]) - 1, 1);
+    } else if (period === "year") {
+      const m = /^(\d{4})$/.exec(dParam);
+      if (m) return new Date(Number(m[1]), 0, 1);
     }
   } catch {
     // fall through
@@ -126,6 +129,24 @@ export function rangeFor(period: AggregatePeriod, anchor: Date, tz: string): Ran
         anchorParam,
         prevAnchor: addMonths(from, -1),
         nextAnchor: addMonths(from, 1),
+        hasNext: !isCurrent,
+      };
+    }
+    case "year": {
+      const from = startOfYear(tzAnchor);
+      const to = endOfYear(tzAnchor);
+      const isCurrent =
+        from.getTime() === startOfYear(now).getTime();
+      const anchorParam = format(tzAnchor, "yyyy");
+      return {
+        from,
+        to,
+        label: format(tzAnchor, "yyyy"),
+        shortLabel: format(tzAnchor, "yyyy"),
+        isCurrent,
+        anchorParam,
+        prevAnchor: addYears(from, -1),
+        nextAnchor: addYears(from, 1),
         hasNext: !isCurrent,
       };
     }
