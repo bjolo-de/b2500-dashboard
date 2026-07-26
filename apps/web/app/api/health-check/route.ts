@@ -27,6 +27,11 @@ const COMPONENTS: ComponentSpec[] = [
   { key: "shelly_script", label: "Shelly",          warnAfterSec: 8 * 60,  downAfterSec: 20 * 60 },
   { key: "forwarder",     label: "Marstek-MQTT",    warnAfterSec: 5 * 60,  downAfterSec: 15 * 60 },
   { key: "pico_bridge",   label: "Pico-Bridge",     warnAfterSec: 8 * 60,  downAfterSec: 20 * 60 },
+  // Derived from the newest marstek_readings row (upserted below): catches
+  // the case where the forwarder process is alive but the B2500 itself
+  // stopped publishing — during the July outage the forwarder stayed green
+  // while no battery telemetry arrived for seven days.
+  { key: "marstek_data",  label: "B2500-Daten",     warnAfterSec: 10 * 60, downAfterSec: 30 * 60 },
 ];
 
 function classify(ageSec: number, spec: ComponentSpec): Severity {
@@ -88,11 +93,16 @@ export async function GET(req: Request) {
   }
   const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-  const [heartbeatsResult, settingsResult] = await Promise.all([
+  const [heartbeatsResult, settingsResult, marstekResult] = await Promise.all([
     supabase
       .from("system_heartbeat")
       .select("component, last_seen, last_alerted_severity"),
     supabase.from("user_settings").select("ntfy_topic").eq("id", 1).single(),
+    supabase
+      .from("marstek_readings")
+      .select("ts")
+      .order("ts", { ascending: false })
+      .limit(1),
   ]);
 
   if (heartbeatsResult.error) {
@@ -102,6 +112,26 @@ export async function GET(req: Request) {
   const ntfyTopic = settingsResult.data?.ntfy_topic ?? null;
   const heartbeats = heartbeatsResult.data ?? [];
   const now = Date.now();
+
+  // Persist the derived marstek_data "heartbeat" (last_seen = newest reading)
+  // so both this classification and the dashboard's status row see it. The
+  // upsert only touches last_seen — alert-state columns stay intact.
+  const marstekTs: string | null = marstekResult.data?.[0]?.ts ?? null;
+  if (marstekTs) {
+    await supabase
+      .from("system_heartbeat")
+      .upsert({ component: "marstek_data", last_seen: marstekTs }, { onConflict: "component" });
+    const existing = heartbeats.find((h) => h.component === "marstek_data");
+    if (existing) {
+      existing.last_seen = marstekTs;
+    } else {
+      heartbeats.push({
+        component: "marstek_data",
+        last_seen: marstekTs,
+        last_alerted_severity: null,
+      });
+    }
+  }
 
   type Item = { spec: ComponentSpec; current: Severity; prev: Severity | null; lastSeen: string | null };
   const items: Item[] = COMPONENTS.map((spec) => {
