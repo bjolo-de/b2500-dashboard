@@ -65,13 +65,22 @@ function priorityFor(s: Severity): string {
 }
 
 async function ntfyPush(topic: string, title: string, message: string, severity: Severity) {
+  const headers: Record<string, string> = {
+    "Title": title,
+    "Tags": severityToTags(severity),
+    "Priority": priorityFor(severity),
+  };
+  // Second delivery channel: ntfy.sh forwards the same message as an email.
+  // iOS APNs delivery for the ntfy app proved unreliable (messages reached
+  // ntfy.sh during the July outage but never banner'd on the phone) — mail
+  // banners via the native Mail app are the dependable fallback. Set
+  // ALERT_EMAIL in the Vercel project env. ntfy.sh caps free-tier emails
+  // at a handful per day; transitions are rare, so that's plenty.
+  const email = process.env.ALERT_EMAIL;
+  if (email) headers["Email"] = email;
   return fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
     method: "POST",
-    headers: {
-      "Title": title,
-      "Tags": severityToTags(severity),
-      "Priority": priorityFor(severity),
-    },
+    headers,
     body: message,
   });
 }
