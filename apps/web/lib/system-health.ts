@@ -51,7 +51,21 @@ const COMPONENTS: Array<{
     downAfterSec: 20 * 60,
     warnHint: "Pico meldet sich verzögert",
     downHint:
-      "Pico nicht erreichbar — Marstek regelt eventuell trotzdem, da B2500 zuletzt einen gültigen Saldo gesehen hat. Prüfen: Router-USB-Strom, WLAN.",
+      "Pico nicht erreichbar — B2500 bekommt keine Zählerdaten und regelt nicht. Pico am Router-USB aus- und wieder einstecken.",
+  },
+  {
+    // Derived component: freshness of the newest marstek_readings row,
+    // upserted by the health-check cron. Covers the blind spot where the
+    // forwarder process is alive (its own heartbeat green) but the B2500
+    // itself stopped publishing — e.g. router/WLAN outage at the battery.
+    key: "marstek_data",
+    label: "B2500-Daten",
+    expectedIntervalSec: 60,             // B2500 publishes ~1/min
+    warnAfterSec: 10 * 60,
+    downAfterSec: 30 * 60,
+    warnHint: "B2500 sendet verzögert Telemetrie",
+    downHint:
+      "Keine Telemetrie vom B2500 — Speicher offline oder MQTT-Pfad unterbrochen (WLAN/Router am Speicher prüfen)",
   },
 ];
 
