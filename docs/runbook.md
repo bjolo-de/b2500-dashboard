@@ -41,8 +41,16 @@ kritischen Zustand gar nicht erst.
    ntfy.sh, erscheinen aber nicht als Banner). Nach App-Reinstall testen:
    `curl -d test -H "Priority: high" https://ntfy.sh/<topic>`
 2. **E-Mail** (zuverlässig): In den Dashboard-Einstellungen (Tarif-Sheet)
-   „Alarm-E-Mail" setzen — jede Statusänderung geht zusätzlich als Mail
-   raus (ntfy-Email-Gateway, wenige Mails/Tag ausreichend).
+   „Alarm-E-Mail" setzen UND `RESEND_API_KEY` in der Vercel-Env hinterlegen
+   (resend.com, Free-Tier, kein eigenes Absender-Domain-Setup nötig).
+   ntfys eigenes E-Mail-Gateway ist für anonyme Nutzung abgeschaltet.
+   Beide Kanäle werden pro Alarm unabhängig versucht — ein kaputter Kanal
+   reißt den anderen nicht mit.
+
+**Kanal-Test jederzeit:**
+`GET /api/health-check?test=push` bzw. `?test=email` — sendet eine
+Testnachricht auf genau diesem Kanal und meldet das Ergebnis, ohne den
+Alarm-Status anzufassen.
 
 ## Alarm-Auslösung (zwei unabhängige Wege)
 

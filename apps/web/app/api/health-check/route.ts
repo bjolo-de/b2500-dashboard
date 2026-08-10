@@ -82,31 +82,44 @@ function priorityFor(s: Severity): string {
   }
 }
 
-async function ntfyPush(
-  topic: string,
-  title: string,
-  message: string,
-  severity: Severity,
-  email: string | null,
-) {
-  const headers: Record<string, string> = {
-    "Title": title,
-    "Tags": severityToTags(severity),
-    "Priority": priorityFor(severity),
-  };
-  // Second delivery channel: ntfy.sh forwards the same message as an email.
-  // iOS APNs delivery for the ntfy app proved unreliable (messages reached
-  // ntfy.sh during both outages but never banner'd on the phone) — mail
-  // banners via the native Mail app are the dependable fallback. Address
-  // comes from user_settings.alert_email (editable in the tariff sheet),
-  // env ALERT_EMAIL as fallback. ntfy.sh caps free-tier emails at a handful
-  // per day; transitions are rare, so that's plenty.
-  if (email) headers["Email"] = email;
+async function ntfyPush(topic: string, title: string, message: string, severity: Severity) {
+  // Deliberately NO ntfy "Email" header here: ntfy.sh rejects anonymous
+  // email sending (HTTP 400), and since header and push share one request,
+  // a configured email would kill the push too. Email goes out separately
+  // via Resend below — the two channels must never share a failure mode.
   return fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
     method: "POST",
-    headers,
+    headers: {
+      "Title": title,
+      "Tags": severityToTags(severity),
+      "Priority": priorityFor(severity),
+    },
     body: message,
   });
+}
+
+// Second delivery channel: direct email via Resend's REST API. iOS/APNs
+// delivery for the ntfy app proved unreliable in both outages — mail
+// banners via the native Mail app are the dependable fallback. Address
+// comes from user_settings.alert_email (tariff sheet); needs
+// RESEND_API_KEY in the Vercel env (free tier, no domain required).
+async function sendAlertEmail(to: string, subject: string, message: string) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error("RESEND_API_KEY not set");
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "B2500 Energy <onboarding@resend.dev>",
+      to: [to],
+      subject,
+      text: message,
+    }),
+  });
+  if (!r.ok) throw new Error(`resend ${r.status}: ${await r.text()}`);
 }
 
 export async function GET(req: Request) {
@@ -147,6 +160,30 @@ export async function GET(req: Request) {
   const ntfyTopic = settingsResult.data?.ntfy_topic ?? null;
   const alertEmail: string | null =
     settingsResult.data?.alert_email ?? process.env.ALERT_EMAIL ?? null;
+
+  // Channel test hook: /api/health-check?test=push|email sends a test
+  // message on that channel and reports the raw outcome — without touching
+  // alert state. Lets us verify delivery end-to-end after config changes.
+  const testMode = new URL(req.url).searchParams.get("test");
+  if (testMode === "push" || testMode === "email") {
+    try {
+      if (testMode === "push") {
+        if (!ntfyTopic) throw new Error("no ntfy topic configured");
+        const r = await ntfyPush(ntfyTopic, "B2500 Energy", "Kanal-Test: ntfy-Push", "ok");
+        if (!r.ok) throw new Error(`ntfy ${r.status}`);
+      } else {
+        if (!alertEmail) throw new Error("no alert_email configured");
+        await sendAlertEmail(alertEmail, "B2500 Energy: Kanal-Test", "Kanal-Test: E-Mail-Zustellung funktioniert.");
+      }
+      return NextResponse.json({ test: testMode, sent: true });
+    } catch (e) {
+      return NextResponse.json(
+        { test: testMode, sent: false, reason: e instanceof Error ? e.message : String(e) },
+        { status: 502 },
+      );
+    }
+  }
+
   const heartbeats = heartbeatsResult.data ?? [];
   const now = Date.now();
 
@@ -189,23 +226,39 @@ export async function GET(req: Request) {
     .map((it) => ({ ...it, msg: transitionMessage(it.spec, it.prev, it.current) }))
     .filter((it): it is Item & { msg: string } => it.msg != null);
 
-  const pushResults: Array<{ component: string; sent: boolean; reason?: string }> = [];
+  const pushResults: Array<{ component: string; channel: string; sent: boolean; reason?: string }> = [];
 
+  // Push and email are attempted independently per transition — a broken
+  // channel must never take the other one down with it.
   for (const t of transitions) {
-    if (!ntfyTopic) {
-      pushResults.push({ component: t.spec.key, sent: false, reason: "no ntfy topic configured" });
-      continue;
+    if (ntfyTopic) {
+      try {
+        const r = await ntfyPush(ntfyTopic, "B2500 Energy", t.msg, t.current);
+        if (!r.ok) throw new Error(`ntfy ${r.status}`);
+        pushResults.push({ component: t.spec.key, channel: "ntfy", sent: true });
+      } catch (e) {
+        pushResults.push({
+          component: t.spec.key,
+          channel: "ntfy",
+          sent: false,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    } else {
+      pushResults.push({ component: t.spec.key, channel: "ntfy", sent: false, reason: "no ntfy topic configured" });
     }
-    try {
-      const r = await ntfyPush(ntfyTopic, "B2500 Energy", t.msg, t.current, alertEmail);
-      if (!r.ok) throw new Error(`ntfy ${r.status}`);
-      pushResults.push({ component: t.spec.key, sent: true });
-    } catch (e) {
-      pushResults.push({
-        component: t.spec.key,
-        sent: false,
-        reason: e instanceof Error ? e.message : String(e),
-      });
+    if (alertEmail) {
+      try {
+        await sendAlertEmail(alertEmail, `B2500 Energy: ${t.spec.label} ${t.current === "ok" ? "wieder online" : t.current}`, t.msg);
+        pushResults.push({ component: t.spec.key, channel: "email", sent: true });
+      } catch (e) {
+        pushResults.push({
+          component: t.spec.key,
+          channel: "email",
+          sent: false,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
   }
 
