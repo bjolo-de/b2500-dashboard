@@ -46,6 +46,7 @@ function TariffSheet({
   const [energy, setEnergy] = useState(String(settings.energy_price_ct_kwh));
   const [base, setBase] = useState(String(settings.base_fee_eur_month));
   const [feedIn, setFeedIn] = useState(String(settings.feed_in_ct_kwh));
+  const [alertEmail, setAlertEmail] = useState(settings.alert_email ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -60,6 +61,7 @@ function TariffSheet({
           energy_price_ct_kwh: energy,
           base_fee_eur_month: base,
           feed_in_ct_kwh: feedIn,
+          alert_email: alertEmail,
         }),
       });
       if (!r.ok) {
@@ -115,6 +117,13 @@ function TariffSheet({
             value={feedIn}
             onChange={setFeedIn}
             help="0 lassen, wenn keine vorhanden"
+          />
+          <Field
+            label="Alarm-E-Mail"
+            unit=""
+            value={alertEmail}
+            onChange={setAlertEmail}
+            help="Ausfall-Meldungen zusätzlich per E-Mail (zuverlässiger als ntfy-Push auf iOS). Leer = aus."
           />
         </div>
 

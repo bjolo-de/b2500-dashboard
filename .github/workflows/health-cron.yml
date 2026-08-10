@@ -1,0 +1,21 @@
+# Redundant health-check trigger. The primary cron runs every 5 min from the
+# Oracle VM — but that VM is itself part of the monitored pipeline (MQTT
+# broker + forwarder). If it dies, it takes the alerting with it and nobody
+# is told. GitHub's scheduler is a fully independent failure domain.
+#
+# GitHub cron is best-effort (runs may lag minutes); that's fine for a
+# redundant path. Double triggering is harmless: transitions are keyed on
+# last_alerted_severity in the DB, so duplicate runs are idempotent.
+name: health-cron
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger health check
+        run: curl -fsS -m 20 https://b2500-dashboard.vercel.app/api/health-check

@@ -40,11 +40,29 @@ function classify(ageSec: number, spec: ComponentSpec): Severity {
   return "ok";
 }
 
-function transitionMessage(label: string, prev: Severity | null, next: Severity): string | null {
+// What the user can actually DO, per component — appended to down alerts so
+// the notification itself is the runbook (see docs/runbook.md for the long
+// form). Learned in the August outage: "X ist offline" alone leaves the
+// reader with a red pill and no plan.
+const ACTION_HINTS: Record<string, string> = {
+  shelly_script:
+    "→ Shelly-Cloud-App öffnen und Gerät neu starten; wenn offline: Router/WLAN prüfen.",
+  forwarder:
+    "→ SSH auf Oracle-VM: docker restart b2500-stack.",
+  pico_bridge:
+    "→ Pico am Router-USB aus- und wieder einstecken.",
+  marstek_data:
+    "→ Marstek-App in der Nähe des Speichers öffnen — Bluetooth weckt das Gerät. Tritt v. a. nach Tiefentladung (SOC ~0 %) auf.",
+};
+
+function transitionMessage(spec: ComponentSpec, prev: Severity | null, next: Severity): string | null {
   if (prev === next) return null;
-  if (next === "down") return `${label} ist offline`;
-  if (next === "warn") return `${label} meldet sich verzögert`;
-  if (next === "ok" && prev != null && prev !== "ok") return `${label} ist wieder online`;
+  if (next === "down") {
+    const hint = ACTION_HINTS[spec.key];
+    return `${spec.label} ist offline${hint ? `\n${hint}` : ""}`;
+  }
+  if (next === "warn") return `${spec.label} meldet sich verzögert`;
+  if (next === "ok" && prev != null && prev !== "ok") return `${spec.label} ist wieder online`;
   return null;
 }
 
@@ -64,7 +82,13 @@ function priorityFor(s: Severity): string {
   }
 }
 
-async function ntfyPush(topic: string, title: string, message: string, severity: Severity) {
+async function ntfyPush(
+  topic: string,
+  title: string,
+  message: string,
+  severity: Severity,
+  email: string | null,
+) {
   const headers: Record<string, string> = {
     "Title": title,
     "Tags": severityToTags(severity),
@@ -72,11 +96,11 @@ async function ntfyPush(topic: string, title: string, message: string, severity:
   };
   // Second delivery channel: ntfy.sh forwards the same message as an email.
   // iOS APNs delivery for the ntfy app proved unreliable (messages reached
-  // ntfy.sh during the July outage but never banner'd on the phone) — mail
-  // banners via the native Mail app are the dependable fallback. Set
-  // ALERT_EMAIL in the Vercel project env. ntfy.sh caps free-tier emails
-  // at a handful per day; transitions are rare, so that's plenty.
-  const email = process.env.ALERT_EMAIL;
+  // ntfy.sh during both outages but never banner'd on the phone) — mail
+  // banners via the native Mail app are the dependable fallback. Address
+  // comes from user_settings.alert_email (editable in the tariff sheet),
+  // env ALERT_EMAIL as fallback. ntfy.sh caps free-tier emails at a handful
+  // per day; transitions are rare, so that's plenty.
   if (email) headers["Email"] = email;
   return fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
     method: "POST",
@@ -106,7 +130,9 @@ export async function GET(req: Request) {
     supabase
       .from("system_heartbeat")
       .select("component, last_seen, last_alerted_severity"),
-    supabase.from("user_settings").select("ntfy_topic").eq("id", 1).single(),
+    // select("*") — tolerant to alert_email not existing until migration
+    // 0005 is applied; the field then simply reads as undefined.
+    supabase.from("user_settings").select("*").eq("id", 1).single(),
     supabase
       .from("marstek_readings")
       .select("ts")
@@ -119,6 +145,8 @@ export async function GET(req: Request) {
   }
 
   const ntfyTopic = settingsResult.data?.ntfy_topic ?? null;
+  const alertEmail: string | null =
+    settingsResult.data?.alert_email ?? process.env.ALERT_EMAIL ?? null;
   const heartbeats = heartbeatsResult.data ?? [];
   const now = Date.now();
 
@@ -158,7 +186,7 @@ export async function GET(req: Request) {
   });
 
   const transitions = items
-    .map((it) => ({ ...it, msg: transitionMessage(it.spec.label, it.prev, it.current) }))
+    .map((it) => ({ ...it, msg: transitionMessage(it.spec, it.prev, it.current) }))
     .filter((it): it is Item & { msg: string } => it.msg != null);
 
   const pushResults: Array<{ component: string; sent: boolean; reason?: string }> = [];
@@ -169,7 +197,7 @@ export async function GET(req: Request) {
       continue;
     }
     try {
-      const r = await ntfyPush(ntfyTopic, "B2500 Energy", t.msg, t.current);
+      const r = await ntfyPush(ntfyTopic, "B2500 Energy", t.msg, t.current, alertEmail);
       if (!r.ok) throw new Error(`ntfy ${r.status}`);
       pushResults.push({ component: t.spec.key, sent: true });
     } catch (e) {

@@ -29,8 +29,9 @@ export async function POST(req: Request) {
   const energy = numOrUndef(body.energy_price_ct_kwh);
   const base = numOrUndef(body.base_fee_eur_month);
   const feedIn = numOrUndef(body.feed_in_ct_kwh);
+  const alertEmail = emailOrUndef(body.alert_email);
 
-  if (energy == null && base == null && feedIn == null) {
+  if (energy == null && base == null && feedIn == null && alertEmail === undefined) {
     return NextResponse.json({ error: "no editable fields provided" }, { status: 400 });
   }
 
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
   if (energy != null) update.energy_price_ct_kwh = energy;
   if (base != null) update.base_fee_eur_month = base;
   if (feedIn != null) update.feed_in_ct_kwh = feedIn;
+  if (alertEmail !== undefined) update.alert_email = alertEmail;
 
   const { error } = await supabase
     .from("user_settings")
@@ -60,4 +62,14 @@ function numOrUndef(v: unknown): number | undefined {
   if (v == null) return undefined;
   const n = typeof v === "string" ? Number(v.replace(",", ".")) : Number(v);
   return Number.isFinite(n) ? n : undefined;
+}
+
+// undefined = field not sent (leave unchanged); null = clear; string = set.
+function emailOrUndef(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  if (s === "") return null;
+  return s.includes("@") && s.includes(".") ? s : undefined;
 }

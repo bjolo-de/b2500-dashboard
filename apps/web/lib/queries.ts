@@ -43,6 +43,8 @@ export type UserSettings = {
   feed_in_ct_kwh: number;
   timezone: string;
   ntfy_topic: string | null;
+  /** Optional — column exists from migration 0005 on; absent reads as undefined. */
+  alert_email?: string | null;
 };
 
 // One row per calendar day from the daily_aggregates RPC. All Wh-style
@@ -214,11 +216,12 @@ export async function fetchAllRollups(tz: string): Promise<DailyAggregateRow[]> 
 }
 
 export async function fetchUserSettings(): Promise<UserSettings> {
+  // select("*") instead of an explicit column list: tolerant to columns
+  // that a pending migration (e.g. 0005 alert_email) hasn't added yet, so
+  // a deploy never breaks the page before the SQL is pasted.
   const { data, error } = await supabase
     .from("user_settings")
-    .select(
-      "energy_price_ct_kwh, base_fee_eur_month, feed_in_ct_kwh, timezone, ntfy_topic"
-    )
+    .select("*")
     .eq("id", 1)
     .single();
   if (error) throw error;
