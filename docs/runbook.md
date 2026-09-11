@@ -34,23 +34,31 @@ Gerätenähe — Bluetooth, nicht MQTT. **Prävention: In der Marstek-App die
 minimale Entladetiefe auf ≥ 10 % stellen** — dann erreicht das Gerät den
 kritischen Zustand gar nicht erst.
 
-## Benachrichtigungskanäle
+## Benachrichtigung: E-Mail (via Resend)
 
-1. **ntfy-Push** (Topic `b2500-mon-…`): Sofort-Kanal. Achtung: Die
-   APNs-Zustellung der iOS-App ist unzuverlässig (Nachrichten erreichen
-   ntfy.sh, erscheinen aber nicht als Banner). Nach App-Reinstall testen:
-   `curl -d test -H "Priority: high" https://ntfy.sh/<topic>`
-2. **E-Mail** (zuverlässig): In den Dashboard-Einstellungen (Tarif-Sheet)
-   „Alarm-E-Mail" setzen UND `RESEND_API_KEY` in der Vercel-Env hinterlegen
-   (resend.com, Free-Tier, kein eigenes Absender-Domain-Setup nötig).
-   ntfys eigenes E-Mail-Gateway ist für anonyme Nutzung abgeschaltet.
-   Beide Kanäle werden pro Alarm unabhängig versucht — ein kaputter Kanal
-   reißt den anderen nicht mit.
+Einziger Kanal. ntfy wurde entfernt — seine iOS-Push-Zustellung war über
+zwei Monate und mehrere Anläufe nicht zum Laufen zu bringen (Nachrichten
+erreichten ntfy.sh, erschienen aber nie als Banner). E-Mail stellt
+zuverlässig als Mail-Banner zu.
+
+Einrichtung:
+1. `RESEND_API_KEY` in der Vercel-Env setzen (resend.com, Free-Tier,
+   Absender `onboarding@resend.dev`, kein eigenes Domain-Setup nötig).
+2. Im Dashboard (Tarif-Sheet) „Alarm-E-Mail" eintragen.
+
+Was löst eine Mail aus: nur **down** (Komponente offline) und **Wiederkehr**
+aus down. Die `warn`-Stufe (kurze Verzögerung) bleibt bewusst still — sonst
+flackern kurze WLAN-Hänger mehrmals täglich in die Inbox; im Dashboard ist
+`warn` weiterhin sichtbar.
 
 **Kanal-Test jederzeit:**
-`GET /api/health-check?test=push` bzw. `?test=email` — sendet eine
-Testnachricht auf genau diesem Kanal und meldet das Ergebnis, ohne den
-Alarm-Status anzufassen.
+`GET /api/health-check?test=email` — sendet eine Testmail und meldet das
+Ergebnis, ohne den Alarm-Status anzufassen.
+
+**Zweiter, unabhängiger Push-Kanal (offen):** Für Redundanz gegen einen
+E-Mail-/Resend-Ausfall ist ein Push-Dienst vorgesehen, der auf iOS
+zuverlässig zustellt (Pushover empfohlen, Telegram als Gratis-Alternative).
+Andockpunkt: `notify()` in `app/api/health-check/route.ts`.
 
 ## Alarm-Auslösung (zwei unabhängige Wege)
 

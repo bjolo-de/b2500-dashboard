@@ -1,11 +1,19 @@
-// Vercel Cron handler — runs every 5 minutes (see vercel.json).
+// Vercel/GitHub Cron handler — runs every few minutes (see vercel.json and
+// .github/workflows/health-cron.yml).
 //
 // Logic: pull all heartbeats, classify each component's severity using the
 // same age thresholds as the dashboard. Compare to last_alerted_severity.
-// On state change, send a single ntfy.sh push and update the row.
+// On a down- or recovery-transition, email the user and update the row.
+//
+// Notification channel is email via Resend. ntfy was removed after its iOS
+// push proved undeliverable across two months of troubleshooting; email has
+// delivered reliably. `warn` transitions are deliberately NOT notified (brief
+// WLAN hiccups flap ok↔warn several times a day) — only `down` and recovery
+// from down reach the inbox. The dashboard still shows warn via lib/
+// system-health.ts, which classifies independently of this route.
 //
 // Authentication: Vercel signs cron requests with a CRON_SECRET. Anyone
-// could trigger this endpoint manually — worst case costs us a few extra
+// could trigger this endpoint manually — worst case costs a few extra
 // notifications, no data exposure.
 
 import { NextResponse } from "next/server";
@@ -55,54 +63,27 @@ const ACTION_HINTS: Record<string, string> = {
     "→ Marstek-App in der Nähe des Speichers öffnen — Bluetooth weckt das Gerät. Tritt v. a. nach Tiefentladung (SOC ~0 %) auf.",
 };
 
+// Returns the notification body, or null if this transition should NOT
+// notify. warn is intentionally silent — only down and recovery-from-down
+// reach the user, so brief ok↔warn flapping never spams the inbox. Because
+// warn never returns a message, it never becomes a recorded transition and
+// last_alerted_severity stays on the ok/down axis: an ok→warn→ok hiccup
+// produces zero mails, while down→warn→ok yields exactly one "wieder online".
 function transitionMessage(spec: ComponentSpec, prev: Severity | null, next: Severity): string | null {
   if (prev === next) return null;
   if (next === "down") {
     const hint = ACTION_HINTS[spec.key];
     return `${spec.label} ist offline${hint ? `\n${hint}` : ""}`;
   }
-  if (next === "warn") return `${spec.label} meldet sich verzögert`;
   if (next === "ok" && prev != null && prev !== "ok") return `${spec.label} ist wieder online`;
   return null;
 }
 
-function severityToTags(s: Severity): string {
-  switch (s) {
-    case "down": return "rotating_light,red_circle";
-    case "warn": return "warning,yellow_circle";
-    case "ok":   return "white_check_mark,green_circle";
-  }
-}
-
-function priorityFor(s: Severity): string {
-  switch (s) {
-    case "down": return "high";
-    case "warn": return "default";
-    case "ok":   return "low";
-  }
-}
-
-async function ntfyPush(topic: string, title: string, message: string, severity: Severity) {
-  // Deliberately NO ntfy "Email" header here: ntfy.sh rejects anonymous
-  // email sending (HTTP 400), and since header and push share one request,
-  // a configured email would kill the push too. Email goes out separately
-  // via Resend below — the two channels must never share a failure mode.
-  return fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
-    method: "POST",
-    headers: {
-      "Title": title,
-      "Tags": severityToTags(severity),
-      "Priority": priorityFor(severity),
-    },
-    body: message,
-  });
-}
-
-// Second delivery channel: direct email via Resend's REST API. iOS/APNs
-// delivery for the ntfy app proved unreliable in both outages — mail
-// banners via the native Mail app are the dependable fallback. Address
-// comes from user_settings.alert_email (tariff sheet); needs
-// RESEND_API_KEY in the Vercel env (free tier, no domain required).
+// Delivery via Resend's REST API. iOS Mail banners are reliable where the
+// ntfy app's APNs push was not. Address comes from user_settings.alert_email
+// (editable in the dashboard's tariff sheet), env ALERT_EMAIL as fallback.
+// Needs RESEND_API_KEY in the Vercel env (free tier, onboarding@resend.dev
+// sender, no domain setup).
 async function sendAlertEmail(to: string, subject: string, message: string) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY not set");
@@ -120,6 +101,30 @@ async function sendAlertEmail(to: string, subject: string, message: string) {
     }),
   });
   if (!r.ok) throw new Error(`resend ${r.status}: ${await r.text()}`);
+}
+
+type ChannelResult = { channel: string; sent: boolean; reason?: string };
+
+// Fan a transition out to every configured channel, each isolated so one
+// broken channel can't suppress another. Adding a push channel (Pushover,
+// Telegram, …) is a second block here — nothing else changes.
+async function notify(
+  alertEmail: string | null,
+  subject: string,
+  message: string,
+): Promise<ChannelResult[]> {
+  const results: ChannelResult[] = [];
+  if (alertEmail) {
+    try {
+      await sendAlertEmail(alertEmail, subject, message);
+      results.push({ channel: "email", sent: true });
+    } catch (e) {
+      results.push({ channel: "email", sent: false, reason: e instanceof Error ? e.message : String(e) });
+    }
+  } else {
+    results.push({ channel: "email", sent: false, reason: "no alert_email configured" });
+  }
+  return results;
 }
 
 export async function GET(req: Request) {
@@ -157,31 +162,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: heartbeatsResult.error.message }, { status: 500 });
   }
 
-  const ntfyTopic = settingsResult.data?.ntfy_topic ?? null;
   const alertEmail: string | null =
     settingsResult.data?.alert_email ?? process.env.ALERT_EMAIL ?? null;
 
-  // Channel test hook: /api/health-check?test=push|email sends a test
-  // message on that channel and reports the raw outcome — without touching
-  // alert state. Lets us verify delivery end-to-end after config changes.
+  // Channel test hook: /api/health-check?test=email sends a test message and
+  // reports the raw outcome — without touching alert state. Verifies delivery
+  // end-to-end after any config change.
   const testMode = new URL(req.url).searchParams.get("test");
-  if (testMode === "push" || testMode === "email") {
-    try {
-      if (testMode === "push") {
-        if (!ntfyTopic) throw new Error("no ntfy topic configured");
-        const r = await ntfyPush(ntfyTopic, "B2500 Energy", "Kanal-Test: ntfy-Push", "ok");
-        if (!r.ok) throw new Error(`ntfy ${r.status}`);
-      } else {
-        if (!alertEmail) throw new Error("no alert_email configured");
-        await sendAlertEmail(alertEmail, "B2500 Energy: Kanal-Test", "Kanal-Test: E-Mail-Zustellung funktioniert.");
-      }
-      return NextResponse.json({ test: testMode, sent: true });
-    } catch (e) {
-      return NextResponse.json(
-        { test: testMode, sent: false, reason: e instanceof Error ? e.message : String(e) },
-        { status: 502 },
-      );
-    }
+  if (testMode === "email") {
+    const results = await notify(alertEmail, "B2500 Energy: Kanal-Test", "Kanal-Test: E-Mail-Zustellung funktioniert.");
+    const ok = results.some((r) => r.channel === "email" && r.sent);
+    return NextResponse.json({ test: "email", results }, { status: ok ? 200 : 502 });
   }
 
   const heartbeats = heartbeatsResult.data ?? [];
@@ -226,44 +217,15 @@ export async function GET(req: Request) {
     .map((it) => ({ ...it, msg: transitionMessage(it.spec, it.prev, it.current) }))
     .filter((it): it is Item & { msg: string } => it.msg != null);
 
-  const pushResults: Array<{ component: string; channel: string; sent: boolean; reason?: string }> = [];
-
-  // Push and email are attempted independently per transition — a broken
-  // channel must never take the other one down with it.
+  const notified: Array<{ component: string; to: Severity } & { results: ChannelResult[] }> = [];
   for (const t of transitions) {
-    if (ntfyTopic) {
-      try {
-        const r = await ntfyPush(ntfyTopic, "B2500 Energy", t.msg, t.current);
-        if (!r.ok) throw new Error(`ntfy ${r.status}`);
-        pushResults.push({ component: t.spec.key, channel: "ntfy", sent: true });
-      } catch (e) {
-        pushResults.push({
-          component: t.spec.key,
-          channel: "ntfy",
-          sent: false,
-          reason: e instanceof Error ? e.message : String(e),
-        });
-      }
-    } else {
-      pushResults.push({ component: t.spec.key, channel: "ntfy", sent: false, reason: "no ntfy topic configured" });
-    }
-    if (alertEmail) {
-      try {
-        await sendAlertEmail(alertEmail, `B2500 Energy: ${t.spec.label} ${t.current === "ok" ? "wieder online" : t.current}`, t.msg);
-        pushResults.push({ component: t.spec.key, channel: "email", sent: true });
-      } catch (e) {
-        pushResults.push({
-          component: t.spec.key,
-          channel: "email",
-          sent: false,
-          reason: e instanceof Error ? e.message : String(e),
-        });
-      }
-    }
+    const subject = `B2500 Energy: ${t.spec.label} ${t.current === "ok" ? "wieder online" : "offline"}`;
+    const results = await notify(alertEmail, subject, t.msg);
+    notified.push({ component: t.spec.key, to: t.current, results });
   }
 
-  // Update last_alerted_severity for components whose state changed —
-  // even if push failed, so we don't loop on retries.
+  // Update last_alerted_severity for components whose state changed — even if
+  // delivery failed, so we don't loop on retries.
   const updates = transitions.map((t) =>
     supabase
       .from("system_heartbeat")
@@ -277,7 +239,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     checkedAt: new Date().toISOString(),
-    ntfyTopic: ntfyTopic ?? null,
+    alertEmail: alertEmail ? "configured" : null,
     items: items.map((it) => ({
       component: it.spec.key,
       current: it.current,
@@ -290,6 +252,6 @@ export async function GET(req: Request) {
       to: t.current,
       message: t.msg,
     })),
-    pushed: pushResults,
+    notified,
   });
 }

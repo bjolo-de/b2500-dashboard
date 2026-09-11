@@ -123,7 +123,7 @@ function TariffSheet({
             unit=""
             value={alertEmail}
             onChange={setAlertEmail}
-            help="Ausfall-Meldungen zusätzlich per E-Mail (zuverlässiger als ntfy-Push auf iOS). Leer = aus."
+            help="Adresse für Ausfall-Meldungen (Speicher offline, Komponente down, Wiederkehr). Leer = keine Benachrichtigungen."
           />
         </div>
 
